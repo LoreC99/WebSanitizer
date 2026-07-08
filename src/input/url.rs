@@ -66,7 +66,7 @@ impl UrlFetcher {
         }
 
         // 6. Se arriviamo qui senza errori, il file è sicuro ed entro i limiti.
-        // Convertiamo i byte in Stringa (se non è UTF-8 valido, per ora la sostituiamo con caratteri sicuri)
+        // Convertiamo i byte in String (se non è UTF-8 valido, per ora la sostituiamo con caratteri sicuri)
         let html_string = String::from_utf8_lossy(&downloaded_bytes).to_string();
 
         Ok(html_string)
