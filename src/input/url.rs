@@ -14,7 +14,7 @@ pub struct UrlFetcher {
     max_depth: u8,
     /// Limite massimo di richieste di rete per singolo documento elaborato.
     max_request: u32,
-    //Tiene traccia delle richieste fatte finora
+    /// Tiene traccia delle richieste fatte finora
     current_requests: AtomicU32,
 }
 
@@ -37,7 +37,7 @@ impl UrlFetcher {
         // 2. Check Richieste e incremento atomico in un solo colpo
         // fetch_add aggiunge 1 e restituisce il valore PRECEDENTE all'aggiunta
         let req_count = self.current_requests.fetch_add(1, Ordering::Relaxed);
-        if req_count >= self.max_request {
+        if req_count > self.max_request {
             return Err("Limite richieste superato".into());
         }
         // 3. Facciamo la richiesta
@@ -58,14 +58,14 @@ impl UrlFetcher {
                 // Sforato il limite! Interrompiamo tutto.
                 // (Nota: in un progetto reale qui creeresti un tuo errore custom,
                 // ma per ora puoi usare un panic o restituire un errore formattato)
-                panic!("Attenzione: Il file supera il limite di {} byte (DoS prevention)!", self.max_bytes);
+                return Err("Attenzione: Il file supera il limite di byte (DoS prevention)!".into());
             }
 
             total_size += chunk_size;
             downloaded_bytes.extend_from_slice(&chunk);
         }
 
-        // 6. Se arriviamo qui senza panic, il file è sicuro ed entro i limiti.
+        // 6. Se arriviamo qui senza errori, il file è sicuro ed entro i limiti.
         // Convertiamo i byte in Stringa (se non è UTF-8 valido, per ora la sostituiamo con caratteri sicuri)
         let html_string = String::from_utf8_lossy(&downloaded_bytes).to_string();
 
