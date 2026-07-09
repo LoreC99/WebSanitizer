@@ -1,4 +1,6 @@
 use std::path::Path;
+use std::process;
+use WebSanitizer::config;
 use std::time::Duration;
 use WebSanitizer::cli::cli::Cli;
 use WebSanitizer::input::directory::DirectoryScanner;
@@ -9,37 +11,70 @@ async fn main() {
     let args= Cli::parse_args();
     println!("Avvio web sanitizer con input: {:?}", args.inputs);
 
-    println!("=== Test del modulo DirectoryScanner ===");
+    println!("=== Avvio Web Sanitizer ===\n");
 
-    // 1. Inizializziamo lo scanner con le nostre regole di sicurezza
-    let allowed_ext = vec!["html".to_string(), "htm".to_string()];
-    let scanner = DirectoryScanner::new(
-        allowed_ext,
-        2,  // max_depth: scendiamo al massimo di 2 livelli
-        5,  // max_files: fermiamoci dopo aver trovato 5 file
-    );
-
-    // 2. Puntiamo alla cartella di test che hai creato
-    let mut vec_test = args.inputs;
-    let path = vec_test.pop().unwrap();
-    let test_dir = Path::new(&path);
-    println!("Inizio scansione della cartella: {}", test_dir.display());
-
-    // 3. Eseguiamo la scansione e gestiamo il risultato
-    match scanner.scan(test_dir) {
-        Ok(files) => {
-            println!("✅ Scansione completata con successo!");
-            println!("Trovati {} file HTML validi:", files.len());
-
-            // Stampiamo l'elenco dei percorsi trovati
-            for (index, file_path) in files.iter().enumerate() {
-                println!("  {}. {}", index + 1, file_path.display());
+    // 2. Carichiamo la policy
+    let policy = match args.policy_path {
+        Some(path) => {
+            println!("Tentativo di caricamento policy da: {:?}", path);
+            // Usiamo un match per gestire elegantemente gli errori (es. file non trovato)
+            match config::load_policy(&path) {
+                Ok(p) => {
+                    println!("Policy personalizzata caricata con successo!");
+                    p
+                }
+                Err(e) => {
+                    eprintln!("ERRORE FATALE: Impossibile leggere il file di policy.");
+                    eprintln!("Dettagli errore: {}", e);
+                    // Usciamo dal programma con codice di errore 1 (come richiesto dalle specifiche PDF)
+                    process::exit(1);
+                }
             }
         }
-        Err(e) => {
-            eprintln!("❌ Errore critico durante la scansione: {}", e);
+        None => {
+            println!("Nessuna policy specificata. Utilizzo della policy di DEFAULT (Strict).");
+            config::default_policy()
         }
-    }
+    };
+
+    // 3. Stampiamo la policy a video per verificare che i dati siano corretti!
+    // L'operatore {:#?} stampa la struct formattata su più righe.
+    println!("\nPolicy attiva:\n{:#?}", policy);
+
+    // 4. (Futuro) Qui passeremo la `policy` e `args.inputs` al Thread Pool / Scheduler
+    // ...
+
+    // println!("=== Test del modulo DirectoryScanner ===");
+    //
+    // // 1. Inizializziamo lo scanner con le nostre regole di sicurezza
+    // let allowed_ext = vec!["html".to_string(), "htm".to_string()];
+    // let scanner = DirectoryScanner::new(
+    //     allowed_ext,
+    //     2,  // max_depth: scendiamo al massimo di 2 livelli
+    //     5,  // max_files: fermiamoci dopo aver trovato 5 file
+    // );
+    //
+    // // 2. Puntiamo alla cartella di test che hai creato
+    // let mut vec_test = args.inputs;
+    // let path = vec_test.pop().unwrap();
+    // let test_dir = Path::new(&path);
+    // println!("Inizio scansione della cartella: {}", test_dir.display());
+    //
+    // // 3. Eseguiamo la scansione e gestiamo il risultato
+    // match scanner.scan(test_dir) {
+    //     Ok(files) => {
+    //         println!("✅ Scansione completata con successo!");
+    //         println!("Trovati {} file HTML validi:", files.len());
+    //
+    //         // Stampiamo l'elenco dei percorsi trovati
+    //         for (index, file_path) in files.iter().enumerate() {
+    //             println!("  {}. {}", index + 1, file_path.display());
+    //         }
+    //     }
+    //     Err(e) => {
+    //         eprintln!("❌ Errore critico durante la scansione: {}", e);
+    //     }
+    // }
 
     // println!("=== Test del modulo UrlFetcher ===");
     //

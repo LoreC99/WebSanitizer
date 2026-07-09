@@ -37,7 +37,7 @@ impl UrlFetcher {
         // 2. Check Richieste e incremento atomico in un solo colpo
         // fetch_add aggiunge 1 e restituisce il valore PRECEDENTE all'aggiunta
         let req_count = self.current_requests.fetch_add(1, Ordering::Relaxed);
-        if req_count > self.max_request {
+        if req_count >= self.max_request {
             return Err("Limite richieste superato".into());
         }
         // 3. Facciamo la richiesta

@@ -1,0 +1,71 @@
+# =====================================================================
+# Web Sanitizer - Policy
+# =====================================================================
+# Questa configurazione definisce un livello di sicurezza "Strict".
+# È pensata per neutralizzare XSS, injection e bloccare richieste esterne.
+
+[html]
+# Blocco totale degli script per prevenire attacchi XSS (Cross-Site Scripting).
+allow_scripts = false
+
+# Rimuove <iframe>, <object> ed <embed> per evitare il caricamento
+# di contenuti attivi o di terze parti non fidate.
+remove_iframes = true
+
+# Allow-list rigorosa dei tag HTML consentiti.
+# Tutto ciò che non è in questa lista verrà rimosso (o ne verrà estratto solo il testo).
+allowed_tags = [
+    # Documento base
+    "html", "head", "body", "title", "meta",
+
+    # Intestazioni e Sezioni
+    "h1", "h2", "h3", "h4", "h5", "h6",
+    "article", "section", "nav", "aside", "header", "footer", "main",
+
+    # Raggruppamento contenuti
+    "p", "hr", "pre", "blockquote", "div", "figure", "figcaption",
+    "ol", "ul", "li", "dl", "dt", "dd",
+
+    # Semantica testuale inline
+    "a", "em", "strong", "small", "s", "cite", "q", "dfn", "abbr",
+    "time", "code", "var", "samp", "kbd", "sub", "sup", "i", "b", "u",
+    "mark", "ruby", "rt", "rp", "bdi", "bdo", "span", "br", "wbr",
+
+    # Contenuti multimediali sicuri
+    "img", "picture", "source",
+
+    # Tabelle
+    "table", "caption", "colgroup", "col", "tbody", "thead", "tfoot", "tr", "td", "th",
+
+    # Elementi interattivi sicuri (senza form)
+    "details", "summary", "dialog"
+]
+
+[url]
+# Consente solo protocolli sicuri o standard.
+# Viene bloccato ad esempio "ftp://" o protocolli custom potenzialmente vulnerabili.
+allowed_schemes = ["http", "https", "mailto"]
+
+# Blocca gli URI data: (es. <img src="data:image/svg+xml;base64,...">)
+# che possono essere usati per nascondere payload malevoli.
+block_data_uris = true
+
+# Blocca gli URI javascript: (es. <a href="javascript:alert(1)">)
+# che sono un classico vettore di attacco XSS.
+block_javascript_uris = true
+
+# blocklist_path = "./samples/blocklist.txt"
+# (Opzionale: omesso di default. Se inserito, il motore scarterà i domini presenti in quel file)
+
+[resources]
+# Impedisce al sanitizer di fare richieste HTTP per scaricare CSS, JS o immagini.
+# Disabilitarlo di default previene attacchi SSRF (Server-Side Request Forgery).
+fetch_resources = false
+
+# Profondità massima per le risorse annidate (es. CSS che importa CSS).
+# Impostato a 0 perché il fetch è disabilitato di default.
+max_depth = 0
+
+# Budget di dimensione per singola risorsa (se fetch_resources fosse true).
+# Impostato a 5 MB (5242880 bytes) per prevenire attacchi DoS (es. compression bombs).
+max_resource_size = 5242880

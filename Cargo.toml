@@ -7,6 +7,8 @@ edition = "2024"
 clap = { version = "4.4", features = ["derive", "env"] }
 tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
-url = { version = "2", features = ["serde"] }
 futures-util = "0.3.32"
 walkdir = "2.5.0"
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.8"
+config = "0.15.25"
