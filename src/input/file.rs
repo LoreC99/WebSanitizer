@@ -38,3 +38,91 @@ impl FileReader {
         Ok(html_string)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::env;
+    use std::path::PathBuf;
+
+    // Helper: Crea un percorso per un file temporaneo sicuro in base al sistema operativo
+    fn get_temp_path(filename: &str) -> PathBuf {
+        let mut path = env::temp_dir();
+        path.push(format!("web_sanitizer_test_{}", filename));
+        path
+    }
+
+    #[tokio::test]
+    async fn test_read_file_success() {
+        let path = get_temp_path("success.html");
+
+        // 1. Creiamo un file temporaneo valido
+        fs::write(&path, "<html><body>Tutto OK</body></html>").await.unwrap();
+
+        // 2. Leggiamo il file con un limite di byte ampio (1024)
+        let reader = FileReader::new(1024);
+        let result = reader.read(&path).await;
+
+        // 3. Verifichiamo il risultato
+        assert!(result.is_ok(), "La lettura del file valido deve avere successo");
+        assert_eq!(result.unwrap(), "<html><body>Tutto OK</body></html>");
+
+        // 4. Pulizia
+        fs::remove_file(&path).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_read_blocca_file_troppo_grandi() {
+        let path = get_temp_path("too_big.html");
+
+        // 1. Scriviamo un file di 20 byte
+        fs::write(&path, "01234567890123456789").await.unwrap();
+
+        // 2. Impostiamo il limite a soli 10 byte (DoS prevention)
+        let reader = FileReader::new(10);
+        let result = reader.read(&path).await;
+
+        // 3. Verifichiamo che venga bloccato PRIMA di leggerlo
+        assert!(result.is_err(), "Il file troppo grande deve generare un errore");
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Il file è più grande della dimensione massima consentita"
+        );
+
+        // 4. Pulizia
+        fs::remove_file(&path).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_read_gestisce_file_inesistenti() {
+        // Percorso volutamente inventato
+        let path = Path::new("/percorso/assolutamente/falso/file.html");
+
+        let reader = FileReader::new(1024);
+        let result = reader.read(&path).await;
+
+        // Deve fallire elegantemente sul controllo di fs::metadata senza fare panic
+        assert!(result.is_err(), "La lettura di un file inesistente deve restituire un errore");
+    }
+
+    #[tokio::test]
+    async fn test_read_gestisce_file_non_utf8() {
+        let path = get_temp_path("invalid_utf8.bin");
+
+        // 1. Scriviamo byte non validi (il byte \xFF non è un carattere testuale UTF-8)
+        let bad_bytes: &[u8] = b"Test \xFF fallito";
+        fs::write(&path, bad_bytes).await.unwrap();
+
+        let reader = FileReader::new(1024);
+        let result = reader.read(&path).await;
+
+        // 2. Il programma non deve crashare.
+        // from_utf8_lossy deve sostituire il byte rotto con il simbolo  (U+FFFD)
+        assert!(result.is_ok());
+        let stringa_letta = result.unwrap();
+        assert!(stringa_letta.contains('\u{FFFD}'), "Il carattere invalido doveva essere rimpiazzato dal simbolo di fallback");
+
+        // 3. Pulizia
+        fs::remove_file(&path).await.unwrap();
+    }
+}

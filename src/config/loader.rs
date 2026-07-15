@@ -64,3 +64,102 @@ pub fn default_policy() -> Policy {
     // è un errore dello sviluppatore (tuo), non dell'utente, ed è giusto che il programma fallisca in modo rumoroso.
     toml::from_str(default_toml).expect("ERRORE INTERNO: Il file strict.toml è malformato")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::env;
+    use std::fs;
+    use std::path::PathBuf;
+
+    // Helper: Crea un percorso per un file temporaneo sicuro
+    fn get_temp_path(filename: &str) -> PathBuf {
+        let mut path = env::temp_dir();
+        path.push(format!("websanitizer_loader_{}", filename));
+        path
+    }
+
+    #[test]
+    fn test_load_policy_success() {
+        let path = get_temp_path("valid.toml");
+
+        // 1. Scriviamo un file TOML valido su disco
+        let toml_content = r#"
+            [html]
+            allow_scripts = true
+            remove_iframes = false
+            allowed_tags = ["html", "p", "a"]
+
+            [url]
+            allowed_schemes = ["https", "mailto"]
+            block_data_uris = true
+            block_javascript_uris = true
+
+            [resources]
+            fetch_resources = true
+            max_depth = 3
+            max_resource_size = 5000
+        "#;
+        fs::write(&path, toml_content).expect("Impossibile creare il file TOML di test");
+
+        // 2. Testiamo la funzione
+        let result = load_policy(&path);
+
+        // 3. Verifiche
+        assert!(result.is_ok(), "Il file TOML valido non è stato caricato correttamente");
+        let policy = result.unwrap();
+
+        assert_eq!(policy.html.allow_scripts, true);
+        assert_eq!(policy.url.allowed_schemes, vec!["https", "mailto"]);
+        assert_eq!(policy.resources.max_depth, 3);
+        assert_eq!(policy.resources.max_resource_size, 5000);
+
+        // 4. Pulizia
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_load_policy_file_not_found() {
+        // Passiamo un percorso che siamo sicuri non esista
+        let result = load_policy("percorso/inventato/inesistente.toml");
+
+        // Deve fallire in modo controllato (Result::Err) e non fare panic
+        assert!(result.is_err(), "Caricare un file inesistente deve restituire un errore");
+    }
+
+    #[test]
+    fn test_load_policy_malformed_toml() {
+        let path = get_temp_path("malformed.toml");
+
+        // 1. Scriviamo un file con sintassi TOML completamente errata
+        let bad_content = r#"
+            [html
+            allow_scripts = "questa_dovrebbe_essere_una_booleana"
+            missing_brackets = true
+        "#;
+        fs::write(&path, bad_content).expect("Impossibile creare il file");
+
+        // 2. Testiamo la funzione
+        let result = load_policy(&path);
+
+        // 3. Verifichiamo che toml::from_str catturi l'errore
+        assert!(result.is_err(), "Un file TOML malformato deve restituire un errore di parsing");
+
+        // 4. Pulizia
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_default_policy_loads_without_panic() {
+        // Questo test è semplicissimo ma fondamentale.
+        // Se il file strict.toml specificato in `include_str!` è malformato,
+        // toml::from_str(...).expect(...) farà crashare (panic) questo test.
+        // Se il test passa, significa che la policy di default è sintatticamente perfetta.
+
+        let policy = default_policy();
+
+        // Facciamo un sanity check su un paio di valori che ci aspettiamo in una policy strict
+        assert_eq!(policy.html.allow_scripts, false, "La policy di default dovrebbe vietare gli script");
+        assert_eq!(policy.html.remove_iframes, true, "La policy di default dovrebbe rimuovere gli iframe");
+    }
+}

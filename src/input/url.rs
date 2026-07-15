@@ -73,3 +73,107 @@ impl UrlFetcher {
     }
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mockito::Server;
+
+    // Funzione helper per creare un UrlFetcher base per i test
+    fn create_test_fetcher(max_bytes: u64, max_depth: u8, max_request: u32) -> UrlFetcher {
+        UrlFetcher::new(max_bytes, max_depth, max_request, Duration::from_secs(2))
+            .expect("Errore nella creazione del fetcher di test")
+    }
+
+    #[tokio::test]
+    async fn test_fetch_success() {
+        let mut server = Server::new_async().await;
+        let mock = server.mock("GET", "/test")
+            .with_status(200)
+            .with_header("content-type", "text/html")
+            .with_body("<html>Successo</html>")
+            .create_async().await;
+
+        let url = format!("{}/test", server.url());
+
+        // Limiti ampi per far passare la richiesta
+        let fetcher = create_test_fetcher(1024, 5, 10);
+        let result = fetcher.fetch(&url, 0).await;
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "<html>Successo</html>");
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_fetch_blocca_limite_profondità() {
+        // Profondità massima 2
+        let fetcher = create_test_fetcher(1024, 2, 10);
+
+        // Proviamo a passare una profondità attuale di 3
+        let result = fetcher.fetch("http://finto.com", 3).await;
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().to_string(), "Limite profondità superato");
+    }
+
+    #[tokio::test]
+    async fn test_fetch_blocca_limite_richieste() {
+        let mut server = Server::new_async().await;
+        let _mock = server.mock("GET", "/test").with_status(200).create_async().await;
+        let url = format!("{}/test", server.url());
+
+        // Limite massimo: 1 richiesta
+        let fetcher = create_test_fetcher(1024, 5, 1);
+
+        // La prima richiesta deve passare (il contatore va a 1)
+        let _ = fetcher.fetch(&url, 0).await;
+
+        // La seconda richiesta deve fallire
+        let result = fetcher.fetch(&url, 0).await;
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().to_string(), "Limite richieste superato");
+    }
+
+    #[tokio::test]
+    async fn test_fetch_blocca_limite_byte_dos() {
+        let mut server = Server::new_async().await;
+
+        // Simuliamo un server che invia una stringa di 20 byte
+        let body = "A".repeat(20);
+        let mock = server.mock("GET", "/heavy")
+            .with_status(200)
+            .with_body(body)
+            .create_async().await;
+
+        let url = format!("{}/heavy", server.url());
+
+        // Configuriamo il fetcher per accettare al massimo 10 byte
+        let fetcher = create_test_fetcher(10, 5, 10);
+        let result = fetcher.fetch(&url, 0).await;
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("limite di byte"));
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_fetch_gestisce_errori_http() {
+        let mut server = Server::new_async().await;
+        // Simuliamo un errore 500 del server
+        let mock = server.mock("GET", "/error")
+            .with_status(500)
+            .create_async().await;
+
+        let url = format!("{}/error", server.url());
+
+        let fetcher = create_test_fetcher(1024, 5, 10);
+        let result = fetcher.fetch(&url, 0).await;
+
+        // Non deve crashare (panic), ma restituire Err grazie a error_for_status()
+        assert!(result.is_err());
+        mock.assert_async().await;
+    }
+}
+
