@@ -50,38 +50,75 @@ impl SanitizerEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    // Importa il trait per poterlo usare nel test
-    use crate::sanitizer::SanitizationRule; 
+    // Assicurati di importare il Node (se non è già importato globalmente nel file)
+    use crate::parser::Node;
+    use crate::sanitizer::SanitizationRule;
 
-    // Creiamo una regola finta per il test
+    // 1. Creiamo una regola finta per il test
     struct MockRule;
+
     impl SanitizationRule for MockRule {
         fn name(&self) -> String { "MOCK_RULE".to_string() }
+
         fn check(&self, content: &str) -> Option<SanitizationAction> {
-            if content == "malware" {
-                return Some(SanitizationAction {
-                    rule_fired: self.name(),
-                    location: "test".to_string(),
-                    original_fragment: "malware".to_string(),
-                    replacement: "safe".to_string(),
-                });
+            todo!()
+        }
+
+        // Sostituiamo il todo!() con una vera logica di ispezione dei Nodi
+        fn apply(&self, node: &mut Node, path: &str) -> Option<SanitizationAction> {
+            // Controlliamo se il nodo corrente è un elemento HTML e si chiama "malware"
+            if let Node::Element { name, .. } = node {
+                if name == "malware" {
+                    return Some(SanitizationAction {
+                        rule_fired: self.name(),
+                        location: path.to_string(), // Registriamo il path dove è scattato
+                        original_fragment: "<malware>".to_string(),
+                        replacement: "Rimosso".to_string(),
+                    });
+                }
             }
             None
         }
     }
 
     #[test]
-    fn test_engine_executes_rules() {
+    fn test_engine_executes_rules_and_catches_threats() {
         let mut engine = SanitizerEngine::new();
         engine.add_rule(Box::new(MockRule));
 
-        // Test con input che scatena la regola
-        let report = engine.run_all("malware");
-        assert_eq!(report.len(), 1);
-        assert_eq!(report[0].rule_fired, "MOCK_RULE");
+        // 2. Creiamo un DOM fittizio INFETTO
+        // Rappresenta questo HTML: <div><malware></malware></div>
+        let mut root_node = Node::element("div");
+        root_node.add_child(Node::element("malware")).expect("Impossibile aggiungere figlio");
 
-        // Test con input pulito
-        let report_clean = engine.run_all("hello world");
-        assert_eq!(report_clean.len(), 0);
+        let malware_dom = vec![root_node];
+
+        // 3. Eseguiamo il motore con la funzione run()
+        let (_processed_dom, report) = engine.run(malware_dom);
+
+        // 4. Verifichiamo che la regola sia scattata correttamente
+        assert_eq!(report.len(), 1, "Il motore doveva rilevare 1 minaccia");
+        assert_eq!(report[0].rule_fired, "MOCK_RULE");
+        // Il path generato dalla tua ricorsione dovrebbe essere qualcosa tipo "div[0] > malware[0]"
+        assert!(report[0].location.contains("malware"));
+    }
+
+    #[test]
+    fn test_engine_ignores_clean_dom() {
+        let mut engine = SanitizerEngine::new();
+        engine.add_rule(Box::new(MockRule));
+
+        // 2. Creiamo un DOM fittizio PULITO
+        // Rappresenta questo HTML: <div><p></p></div>
+        let mut root_node = Node::element("div");
+        root_node.add_child(Node::element("p")).expect("Impossibile aggiungere figlio");
+
+        let clean_dom = vec![root_node];
+
+        // 3. Eseguiamo il motore
+        let (_processed_dom, report) = engine.run(clean_dom);
+
+        // 4. Verifichiamo che il report sia vuoto
+        assert_eq!(report.len(), 0, "Il motore non doveva rilevare nulla su un DOM pulito");
     }
 }

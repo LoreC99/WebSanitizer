@@ -103,6 +103,12 @@ use super::tokenizer::{Tokenizer, Token};
 use super::Node;
 
 const MAX_DEPTH: usize = 128;
+
+// Costante globale per i tag HTML che non richiedono chiusura
+const VOID_ELEMENTS: &[&str] = &[
+    "area", "base", "br", "col", "embed", "hr", "img",
+    "input", "link", "meta", "param", "source", "track", "wbr"
+];
 /*
 l'HTML reale raramente supera 20-30 livelli di annidamento anche in pagine complesse. 128 dà ampio margine per casi legittimi (form dentro tabelle dentro div dentro div...) pur bloccando input patologici.
 */
@@ -130,6 +136,32 @@ impl<'a> HtmlParser<'a> {
 
         loop {
             let token = self.tokenizer.next_token();
+
+            // =======================================================
+            // AUTO-CHIUSURA DEI VOID ELEMENTS
+            // =======================================================
+            // Se il token NON è un attributo, il tag precedente è completo.
+            if !matches!(token, Token::Attribute(_, _)) {
+
+                // Controlliamo in loop la cima dello stack (potrebbero esserci più void tags di fila!)
+                while let Some(top_name) = stack.last().and_then(|n| n.name()) {
+                    if VOID_ELEMENTS.iter().any(|&tag| tag == top_name) {
+
+                        // 1. Lo togliamo dallo stack
+                        let void_node = stack.pop().unwrap();
+
+                        // 2. Lo attacchiamo al padre (o alla radice)
+                        if let Some(parent) = stack.last_mut() {
+                            parent.add_child(void_node).expect("stack contiene solo Element");
+                        } else {
+                            root_nodes.push(void_node);
+                        }
+                    } else {
+                        // Se il nodo in cima non è un void element, interrompiamo il controllo
+                        break;
+                    }
+                }
+            }
             match token {
                 // Quando troviamo un tag aperto, lo mettiamo nello stack
                 Token::TagOpen(name) => {

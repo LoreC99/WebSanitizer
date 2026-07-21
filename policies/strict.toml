@@ -12,6 +12,8 @@ allow_scripts = false
 # di contenuti attivi o di terze parti non fidate.
 remove_iframes = true
 
+block_meta_refresh = true
+
 # Allow-list rigorosa dei tag HTML consentiti.
 # Tutto ciò che non è in questa lista verrà rimosso (o ne verrà estratto solo il testo).
 allowed_tags = [

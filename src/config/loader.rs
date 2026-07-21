@@ -18,6 +18,7 @@ pub struct Policy {
 pub struct HtmlPolicy {
     pub allow_scripts: bool,
     pub remove_iframes: bool,
+    pub block_meta_refresh: bool,
     pub allowed_tags: Vec<String>,
 }
 
