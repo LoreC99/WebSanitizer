@@ -1,10 +1,111 @@
+/* * L'HTML PARSER: Il costruttore del DOM
+ * * Questo modulo trasforma la sequenza "piatta" di Token in una struttura gerarchica (Albero DOM).
+ * * Logica di sicurezza: 
+ * Utilizza uno STACK per gestire l'annidamento e impone un limite (MAX_DEPTH) 
+ * per evitare attacchi DoS basati su profondità eccessiva.
+ */
+
+/*Esempio Pratico: Input vs. Struttura Node
+
+Immaginiamo di passare questo mini codice al tuo parser:
+HTML
+
+<div id="box">Hi</div>
+
+Cosa succede:
+
+    Tokenizer: Produce TagOpen("div"), poi Attribute("id", "box"), poi Text("Hi"), poi TagClose("div").
+
+    Parser: Legge questi token e costruisce l'albero Node.
+
+Cosa ottieni nella struct Node:
+
+Alla fine, la tua funzione parse() ti restituirà un Vec<Node> che contiene questo oggetto:
+Rust
+
+Node::Element {
+    name: "div".to_string(),
+    attributes: vec![("id".to_string(), "box".to_string())],
+    children: vec![
+        Node::Text("Hi".to_string())
+    ],
+}
+Il Tokenizer (in tokenizer.rs) è un'operazione lineare veloce che "spezzetta" il testo in mattoncini (token).
+
+L'HtmlParser (in html.rs) è il "costruttore" che prende quei token e li organizza gerarchicamente nella struttura ad albero (Node).
+*/
+
+/*
+1. Il Segreto: Lo Stack (Pila)
+
+Il parser usa uno stack (una lista Vec<Node>) per ricordare "dove si trova" mentre legge il file.
+
+    Pensa allo stack come a una serie di stanze: quando entri in una stanza (tag di apertura), la aggiungi allo stack; quando esci (tag di chiusura), chiudi la porta e torni in quella precedente.
+
+2. Il Flusso di Lavoro (Algoritmo)
+
+Il HtmlParser scorre i token uno ad uno e agisce così:
+
+    Quando arriva un Token::TagOpen(nome):
+
+        Crea un nuovo Node::Element con quel nome.
+
+        Lo "spinge" (push) dentro lo stack.
+
+        Ora il parser sa che tutto ciò che arriverà dopo sarà "figlio" di questo nodo.
+
+    Quando arriva un Token::Text(contenuto):
+
+        Prende l'ultimo nodo aggiunto allo stack e gli "attacca" un Node::Text come figlio.
+
+    Quando arriva un Token::TagClose(nome):
+
+        Il parser "estrae" (pop) l'ultimo nodo dallo stack.
+
+        Se il nome corrisponde (es. </div> chiude <div>), quel nodo è ora "completato".
+
+        Se lo stack non è vuoto, il nodo appena chiuso viene aggiunto come figlio del nodo che ora è diventato l'ultimo nello stack (il suo genitore).
+
+3. Esempio Concreto
+
+Se hai questo HTML: <div><p>Test</p></div>
+
+    Arriva <div: Lo stack diventa [div].
+
+    Arriva <p: Lo stack diventa [div, p].
+
+    Arriva Test: Il nodo Test viene aggiunto come figlio di p (l'ultimo nello stack).
+
+    Arriva </p>: Il nodo p viene rimosso dallo stack. Poiché il div era sotto di lui, il p viene collegato al div.
+
+    Arriva </div>: Il div viene rimosso dallo stack. È finito.
+
+Riassunto visivo della struttura Node
+
+Alla fine, la tua struct Node in mod.rs avrà una forma ricorsiva perfetta:
+Rust
+
+Node::Element {
+    name: "div".to_string(),
+    attributes: vec![], // Campo obbligatorio!
+    children: vec![
+        Node::Element {
+            name: "p".to_string(),
+            attributes: vec![], // Campo obbligatorio!
+            children: vec![
+                Node::Text("Test".to_string())
+            ],
+        }
+    ],
+} 
+*/
 use super::tokenizer::{Tokenizer, Token};
 use super::Node;
 
 const MAX_DEPTH: usize = 128;
 /*
 l'HTML reale raramente supera 20-30 livelli di annidamento anche in pagine complesse. 128 dà ampio margine per casi legittimi (form dentro tabelle dentro div dentro div...) pur bloccando input patologici.
- */
+*/
 
 #[derive(Debug, PartialEq)]
 pub enum ParseError {
@@ -16,6 +117,7 @@ pub enum ParseError {
 pub struct HtmlParser<'a> {
     tokenizer: Tokenizer<'a>,
 }
+
 
 impl<'a> HtmlParser<'a> {
     pub fn new(input: &'a str) -> Self {
@@ -29,6 +131,7 @@ impl<'a> HtmlParser<'a> {
         loop {
             let token = self.tokenizer.next_token();
             match token {
+                // Quando troviamo un tag aperto, lo mettiamo nello stack
                 Token::TagOpen(name) => {
                     if stack.len() >= MAX_DEPTH {
                         return Err(ParseError::MaxDepthExceeded);
@@ -36,6 +139,7 @@ impl<'a> HtmlParser<'a> {
                     stack.push(Node::element(name));
                 }
 
+                // Quando chiudiamo, lo togliamo dallo stack e lo attacchiamo al padre
                 Token::TagClose(name) => {
                     match stack.pop() {
                         Some(node) => {
@@ -48,7 +152,7 @@ impl<'a> HtmlParser<'a> {
                                     found: name,
                                 });
                             }
-
+                            // Se abbiamo un padre, aggiungiamo questo nodo ai suoi figli
                             if let Some(parent) = stack.last_mut() {
                                 // add_child fallisce solo se il parent è un Text,
                                 // il che non può succedere: nello stack ci finiscono
@@ -57,6 +161,7 @@ impl<'a> HtmlParser<'a> {
                                 parent.add_child(node)
                                     .expect("stack contiene solo Element");
                             } else {
+                                // Se stack vuoto, è un nodo radice
                                 root_nodes.push(node);
                             }
                         }

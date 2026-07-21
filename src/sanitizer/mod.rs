@@ -5,6 +5,10 @@ pub mod resource_rules;
 pub mod factory;
 
 use crate::report::report::SanitizationAction;
+use crate::parser::Node;
+pub use crate::config::loader::HtmlPolicy;
+
+
 
 pub trait SanitizationRule {
     /// Nome identificativo della regola
@@ -12,5 +16,5 @@ pub trait SanitizationRule {
 
     /// Logica che analizza il contenuto e restituisce un'azione se serve pulire
     /// 'content' è il frammento (HTML o URL) da analizzare
-    fn check(&self, content: &str) -> Option<SanitizationAction>;
+    fn apply(&self, node: &mut Node, path: &str) -> Option<SanitizationAction>;
 }

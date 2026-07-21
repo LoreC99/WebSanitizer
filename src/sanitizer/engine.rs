@@ -1,3 +1,4 @@
+use crate::parser::Node;
 use super::SanitizationRule; // Importa il trait definito in mod.rs
 use crate::report::report::SanitizationAction;
 
@@ -14,10 +15,35 @@ impl SanitizerEngine {
         self.rules.push(rule);
     }
 
-    pub fn run_all(&self, content: &str) -> Vec<SanitizationAction> {
-        self.rules.iter()
-            .filter_map(|rule| rule.check(content))
-            .collect()
+    // Il motore accetta il nodo (il DOM)
+    pub fn process_node(&self, node: &mut Node, path: &str,report: &mut Vec<SanitizationAction>) {
+        // 1. Applica le regole su questo nodo
+        for rule in &self.rules {
+            if let Some(action) = rule.apply(node, path) {
+                report.push(action);
+            }
+        }
+        // 2. Ricorsione: passa ai figli
+        if let Node::Element { name, children, .. } = node {
+            for (i, child) in children.iter_mut().enumerate() {
+                // path tipo "html > body[0] > div[2] > iframe[0]"
+                let child_tag = child.name().unwrap_or("#text");
+                let child_path = format!("{} > {}[{}]", path, child_tag, i);
+                self.process_node(child, &child_path, report);
+            }
+        }
+    }
+    //lavora sy node, poi scende ricorsivamente sui figli, e accumula le azioni di sanitizzazione in report
+    pub fn run(&self, mut root_nodes: Vec<Node>) -> (Vec<Node>, Vec<SanitizationAction>) {
+        let mut report = Vec::new();
+
+        for (i, node) in root_nodes.iter_mut().enumerate() {
+            let root_tag = node.name().unwrap_or("#text");
+            let root_path = format!("{}[{}]", root_tag, i);
+            self.process_node(node, &root_path, &mut report);
+        }
+
+        (root_nodes, report)
     }
 }
 

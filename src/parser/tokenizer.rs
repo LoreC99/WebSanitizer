@@ -1,26 +1,37 @@
 
 /*perché hai separato tokenizer da html (che conterrà il DOM Builder):
-
 Tokenizer: È un'operazione lineare. Legge il file una volta sola, senza memoria. È veloce e perfetto per gestire i limiti di buffer (DoS).
+HTML (DOM Builder): È un'operazione gerarchica. Gestisce l'annidamento (<div><span></span></div>). È qui che applicherai 
+la logica di profondità massima per evitare le "bombe ricorsive". */
 
-HTML (DOM Builder): È un'operazione gerarchica. Gestisce l'annidamento (<div><span></span></div>). È qui che applicherai la logica di profondità massima per evitare le "bombe ricorsive". */
+
+/* * IL TOKENIZER: L'Analizzatore Lessicale
+ * * Il compito di questo modulo è "leggere" il flusso grezzo di caratteri e trasformarlo
+ * in entità logiche chiamate "Token". 
+ * * Filosofia: Zero-copy e linearità. Legge il file una sola volta (O(n)).
+ * Non costruisce alberi, non verifica annidamenti. Si occupa solo di capire
+ * cosa è un tag, cosa è un attributo e cosa è testo semplice.
+ */
+
+
 use std::collections::VecDeque;
 
 #[derive(Debug, PartialEq)]
 pub enum Token {
-    TagOpen(String),           // <div
-    TagClose(String),          // </div>
-    Attribute(String, String), // href="valore"
-    Text(String),              // contenuto testuale
-    EOF,                       // Fine del file
+    TagOpen(String),           // Es: <div
+    TagClose(String),          // Es: </div>
+    Attribute(String, String), // Es: class="valore"
+    Text(String),              // Es: contenuto testuale
+    EOF,                       // Segnale di fine file
 }
 
 pub struct Tokenizer<'a> {
     input: &'a str,
-    pos: usize, // indice a BYTE, sempre coerente con &str slicing
-    // Coda di token già "pronti" ma non ancora restituiti:
-    // serve perché un singolo tag può generare più token
-    // (TagOpen + N Attribute) in un'unica scansione.
+    pos: usize, // Indice basato su byte per puntare al carattere corrente
+    
+    // Coda "pending": Un tag può generare più token (apertura + attributi).
+    // Invece di restituire solo il tag, mettiamo gli attributi in coda 
+    // e li restituiamo nelle chiamate successive a next_token().
     pending: VecDeque<Token>,
 }
 
@@ -33,8 +44,7 @@ impl<'a> Tokenizer<'a> {
         }
     }
 
-    // Restituisce il prossimo char senza avanzare, senza usare nth()
-    // (che sarebbe O(n) e comunque basato su indici a char, non a byte)
+    // Restituisce il prossimo char senza avanzare
     fn peek(&self) -> Option<char> {
         self.input[self.pos..].chars().next()
     }
@@ -52,6 +62,7 @@ impl<'a> Tokenizer<'a> {
         }
     }
 
+    
     // Legge caratteri finché non incontra `stop`, senza consumarlo
     fn read_until(&mut self, stop: char) -> String {
         let start = self.pos;
@@ -63,6 +74,7 @@ impl<'a> Tokenizer<'a> {
         }
         self.input[start..self.pos].to_string()
     }
+    
 
     // Legge il nome di un tag: si ferma a spazio, '>', '/' (self-closing)
     fn read_until_space_or_bracket(&mut self) -> String {
@@ -128,23 +140,27 @@ impl<'a> Tokenizer<'a> {
         }
     }
 
+    // Consuma il token successivo. È il punto di ingresso principale.
     pub fn next_token(&mut self) -> Token {
-        // Se abbiamo già token pronti (es. attributi), restituiscili prima
+        // 1. Se ho token in coda (es. attributi), restituiscili prima
         if let Some(tok) = self.pending.pop_front() {
             return tok;
         }
 
         self.skip_whitespace();
 
+        // 2. Controllo EOF
         let c = match self.peek() {
             Some(ch) => ch,
             None => return Token::EOF,
         };
 
+        // 3. Analisi del primo carattere del token
         match c {
             '<' => {
                 self.advance(); // salta '<'
 
+                // Gestione Tag di chiusura (es: </div>)
                 if self.peek() == Some('/') {
                     self.advance(); // salta '/'
                     let name = self.read_until_space_or_bracket();
@@ -155,12 +171,20 @@ impl<'a> Tokenizer<'a> {
                     return Token::TagClose(name);
                 }
 
+                // Gestione Tag di apertura (es: <div)
                 let name = self.read_until_space_or_bracket();
-                let self_closing = self.read_tag_body();
+                let self_closing = self.read_tag_body(); // Legge fino a '>'
 
                 if self_closing {
                     // Trattiamo <br/> come TagOpen seguito subito da TagClose,
                     // così il parser (stack-based) non lo lascia mai aperto.
+                    /*Il problema: I tag come <br/> non hanno un tag di chiusura separato (</br>).
+                    Se il parser leggesse solo TagOpen("br"), lo metterebbe nello stack e non 
+                    lo toglierebbe mai, causando un errore di "tag non chiuso" alla fine del file.
+                    Mette quindi Token::TagClose nella coda pending. Il risultato: Quando il parser
+                    chiama next_token() la volta successiva, riceverà automaticamente 
+                    il TagClose "finto" che avevi preparato, permettendo allo stack di pulirsi 
+                    correttamente senza blocchi. */
                     self.pending.push_back(Token::TagClose(name.clone()));
                 }
 
