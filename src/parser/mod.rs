@@ -1,5 +1,4 @@
 pub mod html;
-pub mod tokenizer;
 
 #[derive(Debug, PartialEq)]
 pub enum Node {

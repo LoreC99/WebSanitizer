@@ -40,8 +40,46 @@ impl UrlFetcher {
         if req_count >= self.max_request {
             return Err("Limite richieste superato".into());
         }
+
         // 3. Facciamo la richiesta
         let response = self.client.get(url).send().await?.error_for_status()?;
+
+        // ==========================================================
+        // NUOVO CONTROLLO: BLOCCO PREVENTIVO DEI CONTENUTI ATTIVI
+        // ==========================================================
+        if let Some(content_type) = response.headers().get(reqwest::header::CONTENT_TYPE) {
+            if let Ok(ct_str) = content_type.to_str() {
+                let ct_lower = ct_str.to_lowercase();
+                // Se il server dichiara esplicitamente che è javascript (es. application/javascript, text/javascript)
+                // non ci interessa se il body è innocuo: lo rigettiamo per prevenire XSS.
+                if ct_lower.contains("javascript") {
+                    return Err("MIME_TYPE_REJECTED: Tipo di contenuto attivo dichiarato bloccato preventivamente.".into());
+                }
+            }
+        }
+
+        // ==========================================================
+        // NUOVO CONTROLLO: PREVENZIONE DECOMPRESSION BOMB (ZIP BOMB)
+        // ==========================================================
+        if response.headers().contains_key(reqwest::header::CONTENT_ENCODING) {
+            // Se il server dichiara che il contenuto è compresso (es. gzip),
+            // rifiutiamo il download a priori. Questo previene attacchi DoS
+            // in cui file minuscoli si espandono a dimensioni gigantesche.
+            return Err("DECOMPRESSION_BOMB_PREVENTION: Rilevato header Content-Encoding. Download bloccato.".into());
+        }
+
+        // ==========================================================
+        // NUOVO CONTROLLO: PREVENZIONE XML BOMB (Billion Laughs)
+        // ==========================================================
+        if let Some(content_type) = response.headers().get(reqwest::header::CONTENT_TYPE) {
+            if let Ok(ct_str) = content_type.to_str() {
+                let ct_lower = ct_str.to_lowercase();
+                if ct_lower.contains("xml") || ct_lower.contains("svg") {
+                    return Err("XML_BOMB_PREVENTION: Rilevato contenuto XML/SVG potenzialmente vulnerabile a entity expansion. Bloccato preventivamente.".into());
+                }
+            }
+        }
+        // ==========================================================
 
         // 4. Otteniamo lo stream (che implementa il trait Stream)
         let mut stream = response.bytes_stream();
@@ -56,8 +94,6 @@ impl UrlFetcher {
 
             if total_size + chunk_size > self.max_bytes {
                 // Sforato il limite! Interrompiamo tutto.
-                // (Nota: in un progetto reale qui creeresti un tuo errore custom,
-                // ma per ora puoi usare un panic o restituire un errore formattato)
                 return Err("Attenzione: Il file supera il limite di byte (DoS prevention)!".into());
             }
 
@@ -66,7 +102,6 @@ impl UrlFetcher {
         }
 
         // 6. Se arriviamo qui senza errori, il file è sicuro ed entro i limiti.
-        // Convertiamo i byte in String (se non è UTF-8 valido, per ora la sostituiamo con caratteri sicuri)
         let html_string = String::from_utf8_lossy(&downloaded_bytes).to_string();
 
         Ok(html_string)
@@ -173,6 +208,29 @@ mod tests {
 
         // Non deve crashare (panic), ma restituire Err grazie a error_for_status()
         assert!(result.is_err());
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_fetch_rejects_declared_javascript() {
+        let mut server = Server::new_async().await;
+
+        // Simuliamo un server che restituisce un file di testo innocuo
+        // ma dichiara malignamente (o per errore) che si tratta di JavaScript
+        let mock = server.mock("GET", "/finto-script")
+            .with_status(200)
+            .with_header("content-type", "text/javascript; charset=utf-8")
+            .with_body("Questo è solo testo innocuo")
+            .create_async().await;
+
+        let url = format!("{}/finto-script", server.url());
+
+        let fetcher = create_test_fetcher(1024, 5, 10);
+        let result = fetcher.fetch(&url, 0).await;
+
+        // Il fetcher deve restituire errore PRIMA di scaricare il corpo
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("MIME_TYPE_REJECTED"));
         mock.assert_async().await;
     }
 }
