@@ -1,266 +1,155 @@
-use axum::{routing::post, Json, Router};
-use tokio::net::TcpListener;
+use std::sync::Arc;
+use std::sync::mpsc;
+use std::collections::HashSet;
+use std::sync::atomic::Ordering;
+use std::fs;
+use std::path::Path;
+// Importiamo le tue strutture
+use WebSanitizer::cli::cli::Cli;
+use WebSanitizer::scheduler::workers::{Job, SharedState, ThreadPool};
+use serde::Serialize;
+use WebSanitizer::report::SanitizationReport;
+use WebSanitizer::utils::utils::explore_directory;
 
-// ==========================================
-// IMPORTAZIONI DALLA LIBRERIA
-// ==========================================
-use WebSanitizer::config::loader;
-use WebSanitizer::input::url::UrlFetcher;
-use WebSanitizer::parser::html::HtmlParser;
-use WebSanitizer::sanitizer::engine::SanitizerEngine;
-use WebSanitizer::sanitizer::html_rules::{DangerousAttributeRule, IdnHomographRule, MetaRefreshRule, SsrfAttributeRule, TagAllowListRule};
-use WebSanitizer::report::{SanitizationAction, SanitizationReport};
-use WebSanitizer::report::report::SanitizationRequest;
-// Aggiunti MimeSniffer e DetectedType
-use WebSanitizer::sanitizer::resource_rules::{CssSanitizer, MimeSniffer, DetectedType};
-
-// ==========================================
-// IL MOTORE DEL SERVER (PUNTO DI INGRESSO)
-// ==========================================
-
-#[tokio::main]
-async fn main() {
-    // Creiamo il router per intercettare le richieste POST
-    let app = Router::new().route("/v1/resources", post(process_resource));
-
-    // Ci mettiamo in ascolto sulla porta 3000
-    let listener = TcpListener::bind("0.0.0.0:3000").await.expect("Impossibile aprire la porta 3000");
-
-    println!("🚀 Web Sanitizer in ascolto su http://localhost:3000");
-    println!("In attesa di richieste da evil-origin...\n");
-
-    // Avviamo il loop del server
-    axum::serve(listener, app).await.unwrap();
+#[derive(Serialize)]
+pub struct BatchReport {
+    pub total_processed: u32,
+    pub total_threats_removed: u32,
+    pub success_count: u32,
+    pub error_count: u32,
+    pub detailed_results: Vec<SanitizationReport>,
 }
 
-// ==========================================
-// LOGICA DI GESTIONE DELLA RICHIESTA
-// ==========================================
+fn main() {
+    // 1. Parsing automatico degli argomenti da riga di comando
+    let cli = Cli::parse_args();
 
-pub async fn process_resource(Json(payload): Json<SanitizationRequest>) -> Json<SanitizationReport> {
-    println!("⚡ RICEVUTA RICHIESTA!");
-    println!("-> Target: {}", payload.url);
+    let inputs = cli.inputs.clone();
+    let num_jobs = inputs.len();
 
-    // 1. Carichiamo la policy di default
-    let policy = loader::default_policy();
+    println!("⚡ Avvio Web Sanitizer CLI...");
+    println!("-> Trovati {} target da elaborare in batch.", num_jobs);
 
-    // 2. Inizializziamo il Fetcher per scaricare l'URL
-    let fetcher = match UrlFetcher::new(
-        policy.resources.max_resource_size,
-        policy.resources.max_depth,
-        10,
-        std::time::Duration::from_secs(5),
-    ) {
-        Ok(f) => f,
-        Err(e) => {
-            return Json(SanitizationReport {
-                input_source: payload.url,
-                status: "Error".to_string(),
-                actions: vec![SanitizationAction {
-                    rule_fired: "INITIALIZATION_ERROR".to_string(),
-                    location: "UrlFetcher".to_string(),
-                    original_fragment: e.to_string(),
-                    replacement: "Aborted".to_string(),
-                }],
-                sanitized_html: "".to_string(),
-            });
+    // Prepariamo la directory di output se non esiste
+    if let Err(e) = fs::create_dir_all(&cli.output_dir) {
+        eprintln!("❌ Errore nella creazione della cartella di output: {}", e);
+        std::process::exit(1);
+    }
+
+    // 2. Inizializzazione dello Stato Condiviso e dei Canali
+    let shared_state = Arc::new(SharedState::new(HashSet::new()));
+    let (result_sender, result_receiver) = mpsc::channel();
+
+    // 3. Configurazione del numero di thread dinamico
+    // Se l'utente non passa -t, usiamo i core logici disponibili della CPU (fallback a 4)
+    let num_threads = cli.threads.unwrap_or_else(|| {
+        std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4)
+    });
+    println!("-> Avvio pool con {} thread worker.\n", num_threads);
+
+    // Condividiamo la configurazione CLI (in sola lettura) tra tutti i worker
+    let cli_config = Arc::new(cli);
+
+    // 4. Creazione del ThreadPool (passiamo anche cli_config)
+    let pool = ThreadPool::new(
+        num_threads,
+        Arc::clone(&shared_state),
+        result_sender,
+        Arc::clone(&cli_config)
+    );
+
+    // 5. Distribuzione del Lavoro (Astrazione Input)
+    for target in inputs {
+        if target.starts_with("http://") || target.starts_with("https://") {
+            // È chiaramente un URL di rete
+            pool.execute(Job::Url(target));
+        } else {
+            // Trattiamolo come percorso locale
+            let path = Path::new(&target);
+
+            if path.is_file() {
+                pool.execute(Job::File(target));
+            } else if path.is_dir() {
+                println!("📂 Rilevata directory locale: {}. Scansione in corso...", target);
+                explore_directory(path, &pool);
+            } else {
+                eprintln!("⚠️ Attenzione: L'input '{}' non è né un URL valido né un percorso locale esistente.", target);
+            }
         }
+    }
+    drop(pool); // Permette la chiusura pulita una volta svuotata la coda
+
+    // 6. Raccolta dei risultati
+    let mut success_count = 0;
+    let mut error_count = 0;
+    let mut all_reports = Vec::new();
+
+    println!("================ REPORT IN TEMPO REALE ================");
+    for _ in 0..num_jobs {
+        if let Ok(result) = result_receiver.recv() {
+            if let Some(error) = result.error {
+                println!("❌ FALLITO: {} -> {}", result.target, error);
+                error_count += 1;
+            } else if let Some(report) = result.report {
+                println!("✅ COMPLETATO: {} -> (Minacce rimosse: {})",
+                         result.target, report.actions.len());
+                success_count += 1;
+
+                // ========================================================
+                // NUOVO: SALVATAGGIO DEL FILE HTML SANITIZZATO
+                // ========================================================
+
+                // 1. Creiamo un nome file sicuro a partire dall'URL
+                let safe_filename = result.target.replace(&['/', ':', '\\', '?', '&', '=', '#'][..], "_");
+
+                // 2. Uniamo il percorso della cartella di output con il nuovo nome
+                let file_path = cli_config.output_dir.join(format!("{}.html", safe_filename));
+
+                // 3. Scriviamo il contenuto pulito su disco
+                if let Err(e) = fs::write(&file_path, &report.sanitized_html) {
+                    eprintln!("   ⚠️ Errore nel salvare il file HTML per {}: {}", result.target, e);
+                } else {
+                    println!("   -> Contenuto pulito salvato in: {:?}", file_path);
+                }
+
+                // ========================================================
+
+                all_reports.push(report);
+            }
+        }
+    }
+    println!("=======================================================");
+
+    // 7. Statistiche Globali
+    let total_processed = shared_state.total_processed.load(Ordering::Relaxed);
+    let total_threats = shared_state.threats_removed.load(Ordering::Relaxed);
+
+    println!("\n📊 STATISTICHE BATCH FINALI:");
+    println!("   - Target elaborati con successo: {}", success_count);
+    println!("   - Target falliti: {}", error_count);
+    println!("   - Minacce totali rimosse: {}\n", total_threats);
+
+    // ==========================================
+    // 8. SALVATAGGIO DEL REPORT JSON GLOBALE
+    // ==========================================
+    let batch_report = BatchReport {
+        total_processed,
+        total_threats_removed: total_threats,
+        success_count,
+        error_count,
+        detailed_results: all_reports,
     };
 
-    // 3. Scarichiamo il contenuto
-    match fetcher.fetch(&payload.url, 0).await {
-        Ok(raw_content) => {
-            println!("-> Contenuto scaricato. Avvio MIME Sniffing...");
-
-            let raw_bytes = raw_content.as_bytes();
-            let detected_type = MimeSniffer::sniff(raw_bytes);
-
-            let mut is_css = false;
-            let mut is_html = false;
-
-            // ==========================================
-            // IL BIVIO DI ROUTING BASATO SUL VERO CONTENUTO
-            // ==========================================
-            match detected_type {
-                DetectedType::Html => {
-                    println!("-> [MIME] Rilevato HTML vero e proprio!");
-                    is_html = true;
-                },
-                DetectedType::Png => {
-                    println!("-> [MIME] Rilevata Immagine PNG vera e propria!");
-                    // TODO: Implementeremo il PngSanitizer qui nei prossimi step
-                    return Json(SanitizationReport {
-                        input_source: payload.url,
-                        status: "Clean".to_string(),
-                        actions: vec![],
-                        sanitized_html: "PNG Image (Placeholder)".to_string(),
-                    });
-                },
-                DetectedType::Pdf => {
-                    println!("-> [MIME] Rilevato PDF vero e proprio!");
-                    // TODO: Implementeremo il PdfSanitizer qui nei prossimi step
-                    return Json(SanitizationReport {
-                        input_source: payload.url,
-                        status: "Clean".to_string(),
-                        actions: vec![],
-                        sanitized_html: "PDF Document (Placeholder)".to_string(),
-                    });
-                },
-                DetectedType::Unknown => {
-                    // Fallback: Se non sappiamo cos'è, guardiamo l'URL
-                    if payload.url.contains("/css/") || payload.url.ends_with(".css") {
-                        println!("-> [MIME] Tipo sconosciuto, ma URL indica CSS.");
-                        is_css = true;
-                    } else {
-                        println!("-> [MIME] Tipo sconosciuto. Fallback su HtmlParser per sicurezza...");
-                        is_html = true;
-                    }
-                }
+    // Serializziamo in formato JSON leggibile ("pretty")
+    match serde_json::to_string_pretty(&batch_report) {
+        Ok(json_string) => {
+            // Scriviamo sul disco al percorso specificato dalla CLI (es. --report-file)
+            if let Err(e) = fs::write(&cli_config.report_file, json_string) {
+                eprintln!("❌ Errore durante il salvataggio del report su disco: {}", e);
+            } else {
+                println!("📄 Report JSON globale salvato con successo in: {:?}", cli_config.report_file);
             }
-
-            // ==========================================
-            // ESECUZIONE DEL SANIFICATORE CSS
-            // ==========================================
-            if is_css {
-                println!("-> Avvio CssSanitizer...");
-                let sanitized_css = CssSanitizer::sanitize(&raw_content);
-
-                let mut report_actions = Vec::new();
-                if sanitized_css != raw_content {
-                    report_actions.push(SanitizationAction {
-                        rule_fired: "MALICIOUS_CSS_SANITIZED".to_string(),
-                        location: "Stylesheet".to_string(),
-                        original_fragment: "Active CSS Vectors".to_string(),
-                        replacement: "Stripped".to_string(),
-                    });
-                }
-
-                let status = if report_actions.is_empty() {
-                    "Clean".to_string()
-                } else {
-                    "Cleaned".to_string()
-                };
-
-                return Json(SanitizationReport {
-                    input_source: payload.url,
-                    status,
-                    actions: report_actions,
-                    sanitized_html: sanitized_css,
-                });
-            }
-
-            // ==========================================
-            // ESECUZIONE DEL SANIFICATORE HTML
-            // ==========================================
-            if is_html {
-                println!("-> Avvio HtmlParser...");
-                let clean_raw_html = raw_content
-                    .replace("<!doctype html>", "")
-                    .replace("<!DOCTYPE html>", "")
-                    .replace("<!DOCTYPE HTML>", "");
-
-                // 4. PARSING: String -> Vec<Node>
-                let mut parser = HtmlParser::new(&clean_raw_html);
-                return match parser.parse() {
-                    Ok(dom) => {
-                        println!("-> Parsing completato. Avvio Sanitizer Engine...");
-
-                        // 5. ENGINE: Pulizia del DOM
-                        let mut engine = SanitizerEngine::new();
-
-                        // --- APPLICAZIONE DINAMICA DELLE POLICY ---
-                        let mut active_html_policy = policy.html.clone();
-
-                        if active_html_policy.remove_iframes {
-                            active_html_policy.allowed_tags.retain(|tag| !["iframe", "object", "embed"].contains(&tag.as_str()));
-                        }
-
-                        if !active_html_policy.allow_scripts {
-                            active_html_policy.allowed_tags.retain(|tag| tag != "script");
-                        }
-
-                        engine.add_rule(Box::new(TagAllowListRule {
-                            config: active_html_policy.clone(),
-                        }));
-
-                        if active_html_policy.block_meta_refresh {
-                            engine.add_rule(Box::new(MetaRefreshRule {
-                                config: active_html_policy,
-                            }));
-                        }
-
-                        engine.add_rule(Box::new(DangerousAttributeRule {
-                            url_config: policy.url.clone(),
-                        }));
-
-                        engine.add_rule(Box::new(SsrfAttributeRule {
-                            config: policy.url.clone(),
-                        }));
-
-                        engine.add_rule(Box::new(IdnHomographRule));
-                        // ------------------------------------------
-
-                        let (clean_dom, report_actions) = engine.run(dom);
-
-                        // 6. RENDERING: Vec<Node> -> String
-                        let mut clean_html_string = String::new();
-                        for node in clean_dom {
-                            clean_html_string.push_str(&node.to_html_string());
-                        }
-
-                        // 7. DETERMINAZIONE DELLO STATO
-                        let status = if report_actions.is_empty() {
-                            "Clean".to_string()
-                        } else {
-                            "Cleaned".to_string()
-                        };
-
-                        println!("-> Pulizia completata! Trovate {} minacce.", report_actions.len());
-
-                        Json(SanitizationReport {
-                            input_source: payload.url,
-                            status,
-                            actions: report_actions,
-                            sanitized_html: clean_html_string,
-                        })
-                    },
-                    Err(e) => {
-                        Json(SanitizationReport {
-                            input_source: payload.url,
-                            status: "Rejected".to_string(),
-                            actions: vec![SanitizationAction {
-                                rule_fired: "HTML_PARSER_ERROR".to_string(),
-                                location: "Parser".to_string(),
-                                original_fragment: format!("{:?}", e),
-                                replacement: "Rejected".to_string(),
-                            }],
-                            sanitized_html: "".to_string(),
-                        })
-                    }
-                }
-            }
-
-            // Fallback finale di sicurezza (non dovrebbe mai essere raggiunto)
-            Json(SanitizationReport {
-                input_source: payload.url,
-                status: "Error".to_string(),
-                actions: vec![],
-                sanitized_html: "".to_string(),
-            })
-        }
-        Err(e) => {
-            // Errore di rete
-            Json(SanitizationReport {
-                input_source: payload.url,
-                status: "Error".to_string(),
-                actions: vec![SanitizationAction {
-                    rule_fired: "NETWORK_ERROR".to_string(),
-                    location: "Fetcher".to_string(),
-                    original_fragment: e.to_string(),
-                    replacement: "Aborted".to_string(),
-                }],
-                sanitized_html: "".to_string(),
-            })
-        }
+        },
+        Err(e) => eprintln!("❌ Errore durante la serializzazione del report JSON: {}", e),
     }
 }
