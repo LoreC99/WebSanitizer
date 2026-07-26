@@ -12,7 +12,7 @@ use WebSanitizer::sanitizer::html_rules::{DangerousAttributeRule, IdnHomographRu
 use WebSanitizer::report::{SanitizationAction, SanitizationReport};
 use WebSanitizer::report::report::SanitizationRequest;
 // Aggiunti MimeSniffer e DetectedType
-use WebSanitizer::sanitizer::resource_rules::{CssSanitizer, MimeSniffer, DetectedType};
+use WebSanitizer::sanitizer::resource_rules::{CssSanitizer, MimeSniffer, DetectedType, ResourceRules};
 
 // ==========================================
 // IL MOTORE DEL SERVER (PUNTO DI INGRESSO)
@@ -88,23 +88,48 @@ pub async fn process_resource(Json(payload): Json<SanitizationRequest>) -> Json<
                 },
                 DetectedType::Png => {
                     println!("-> [MIME] Rilevata Immagine PNG vera e propria!");
-                    // TODO: Implementeremo il PngSanitizer qui nei prossimi step
-                    return Json(SanitizationReport {
-                        input_source: payload.url,
-                        status: "Clean".to_string(),
-                        actions: vec![],
-                        sanitized_html: "PNG Image (Placeholder)".to_string(),
-                    });
+                    match ResourceRules::check_png_dimensions(raw_bytes) {
+                        Ok(()) => {
+                            return Json(SanitizationReport {
+                                input_source: payload.url,
+                                status: "Clean".to_string(),
+                                actions: vec![],
+                                sanitized_html: "PNG Image (dimensioni entro i limiti)".to_string(),
+                            });
+                        }
+                        Err(reason) => {
+                            let action: SanitizationAction = reason.into();
+                            return Json(SanitizationReport {
+                                input_source: payload.url,
+                                status: "Rejected".to_string(),
+                                actions: vec![action],
+                                sanitized_html: "".to_string(),
+                            });
+                        }
+                    }
                 },
                 DetectedType::Pdf => {
                     println!("-> [MIME] Rilevato PDF vero e proprio!");
-                    // TODO: Implementeremo il PdfSanitizer qui nei prossimi step
-                    return Json(SanitizationReport {
-                        input_source: payload.url,
-                        status: "Clean".to_string(),
-                        actions: vec![],
-                        sanitized_html: "PDF Document (Placeholder)".to_string(),
-                    });
+                    // Controlliamo se il PDF contiene contenuti attivi
+                    match ResourceRules::check_pdf_active_content(raw_bytes) {
+                        Ok(()) => {
+                            return Json(SanitizationReport {
+                                input_source: payload.url,
+                                status: "Clean".to_string(),
+                                actions: vec![],
+                                sanitized_html: "PDF Document without active content".to_string(),
+                            });
+                        }
+                        Err(reason) => {
+                            let action: SanitizationAction = reason.into();
+                            return Json(SanitizationReport {
+                                input_source: payload.url,
+                                status: "Rejected".to_string(),
+                                actions: vec![action],
+                                sanitized_html: "".to_string(),
+                            });
+                        }
+                    }
                 },
                 DetectedType::Unknown => {
                     // Fallback: Se non sappiamo cos'è, guardiamo l'URL
