@@ -1,0 +1,21 @@
+{
+  "total_processed": 1,
+  "total_threats_removed": 1,
+  "success_count": 1,
+  "error_count": 0,
+  "detailed_results": [
+    {
+      "input_source": "test/test.html",
+      "status": "Cleaned",
+      "actions": [
+        {
+          "rule_fired": "TAG_NOT_ALLOW_LISTED",
+          "location": "html[0] > script[10]",
+          "original_fragment": "<script>...1 children...</script>",
+          "replacement": ""
+        }
+      ],
+      "sanitized_html": "<html lang=\"it\">\n\n\n    <meta charset=\"UTF-8\">\n    <title>Pagina di Test Web Sanitizer</title>\n\n\n    <h1>Benvenuto nella pagina di test</h1>\n    <p>Questo è un testo del tutto normale e sicuro.</p>\n    \n    \n    \n    \n    <a href=\"http://example.com\">Link sicuro</a>\n\n</html>"
+    }
+  ]
+}

@@ -61,6 +61,39 @@ pub struct Cli {
         default_value = "30"
     )]
     pub timeout_seconds: u64,
+
+    /// Numero di thread worker da utilizzare (default: numero di core logici)
+    #[arg(
+        short = 't',
+        long = "threads",
+        value_name = "THREADS"
+    )]
+    pub threads: Option<usize>,
+
+    /// Profondità massima per il download delle sotto-risorse (es. CSS nei CSS)
+    #[arg(
+        long = "max-depth",
+        value_name = "DEPTH",
+        default_value = "0"
+    )]
+    pub max_depth: u8,
+
+    /// Numero massimo di richieste HTTP per singolo input
+    #[arg(
+        long = "max-requests",
+        value_name = "REQUESTS",
+        default_value = "50"
+    )]
+    pub max_requests: u32,
+
+    /// Percorso in cui salvare il report JSON globale dell'elaborazione batch
+    #[arg(
+        short = 'r',
+        long = "report-file",
+        value_name = "REPORT_PATH",
+        default_value = "./sanitizer_report.json"
+    )]
+    pub report_file: PathBuf,
 }
 
 impl Cli {
