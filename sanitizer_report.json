@@ -1,21 +1,27 @@
 {
   "total_processed": 1,
-  "total_threats_removed": 1,
+  "total_threats_removed": 2,
   "success_count": 1,
   "error_count": 0,
   "detailed_results": [
     {
-      "input_source": "test/test.html",
+      "input_source": "http://127.0.0.1:3100/mime/scripted-pdf",
       "status": "Cleaned",
       "actions": [
         {
-          "rule_fired": "TAG_NOT_ALLOW_LISTED",
-          "location": "html[0] > script[10]",
-          "original_fragment": "<script>...1 children...</script>",
-          "replacement": ""
+          "rule_fired": "PDF_ACTIVE_CONTENT_STRIPPED",
+          "location": "PDF Object ID: (1, 0)",
+          "original_fragment": "OpenAction",
+          "replacement": "Stripped (lopdf mode)"
+        },
+        {
+          "rule_fired": "PDF_ACTIVE_CONTENT_STRIPPED",
+          "location": "PDF Object ID: (4, 0)",
+          "original_fragment": "JS",
+          "replacement": "Stripped (lopdf mode)"
         }
       ],
-      "sanitized_html": "<html lang=\"it\">\n\n\n    <meta charset=\"UTF-8\">\n    <title>Pagina di Test Web Sanitizer</title>\n\n\n    <h1>Benvenuto nella pagina di test</h1>\n    <p>Questo è un testo del tutto normale e sicuro.</p>\n    \n    \n    \n    \n    <a href=\"http://example.com\">Link sicuro</a>\n\n</html>"
+      "sanitized_html": "PDF Document (Sanitized: Active Content Stripped)"
     }
   ]
 }

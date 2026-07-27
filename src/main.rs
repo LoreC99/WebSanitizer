@@ -4,7 +4,6 @@ use std::collections::HashSet;
 use std::sync::atomic::Ordering;
 use std::fs;
 use std::path::Path;
-// Importiamo le tue strutture
 use WebSanitizer::cli::cli::Cli;
 use WebSanitizer::scheduler::workers::{Job, SharedState, ThreadPool};
 use serde::Serialize;

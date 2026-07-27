@@ -13,8 +13,8 @@ use crate::parser::html::HtmlParser;
 use crate::sanitizer::engine::SanitizerEngine;
 use crate::sanitizer::html_rules::{DangerousAttributeRule, IdnHomographRule, MetaRefreshRule, SsrfAttributeRule, TagAllowListRule};
 use crate::report::{SanitizationAction, SanitizationReport};
-use crate::sanitizer::resource_rules::{CssSanitizer, MimeSniffer, DetectedType};
-
+use crate::sanitizer::resource_rules::{CssSanitizer, MimeSniffer, DetectedType, ImageValidator, PdfValidator};
+use crate::sanitizer::url_rules::UrlValidator;
 // ==========================================
 // 1. STATO CONDIVISO (Shared State)
 // ==========================================
@@ -71,7 +71,7 @@ impl ThreadPool {
         size: usize,
         shared_state: Arc<SharedState>,
         result_sender: mpsc::Sender<JobResult>,
-        config: Arc<Cli> // <--- 1. AGGIUNTO QUI
+        config: Arc<Cli>
     ) -> ThreadPool {
         assert!(size > 0);
         let (sender, receiver) = mpsc::channel();
@@ -84,7 +84,7 @@ impl ThreadPool {
                 Arc::clone(&receiver),
                 Arc::clone(&shared_state),
                 result_sender.clone(),
-                Arc::clone(&config), // <--- 2. PASSATO AL WORKER CLONANDO L'ARC
+                Arc::clone(&config), 
             ));
         }
 
@@ -169,6 +169,17 @@ impl Worker {
                             // 1. ASTRAZIONE DELL'INPUT: Rete o File Locale?
                             let fetch_result = match job {
                                 Job::Url(url) => {
+                                    // ========================================================
+                                    // NUOVO: VALIDAZIONE PREVENTIVA DELL'URL INIZIALE
+                                    // ========================================================
+                                    if let Err(reason) = UrlValidator::is_safe_redirect_hop(&url) {
+                                        return JobResult {
+                                            target: target_name.clone(),
+                                            report: None,
+                                            error: Some(format!("URL bloccato preventivamente: {}", reason)),
+                                        };
+                                    }
+
                                     // Inizializziamo il fetcher solo se ci serve la rete
                                     let fetcher = match UrlFetcher::new(
                                         config.max_bytes,
@@ -208,6 +219,17 @@ impl Worker {
                                     match detected_type {
                                         DetectedType::Html => { is_html = true; },
                                         DetectedType::Png => {
+                                            // =======================================================
+                                            // CONTROLLO: VALIDAZIONE DIMENSIONI PNG (DIMENSION BOMB)
+                                            // =======================================================
+                                            if let Err(reason) = ImageValidator::check_png_dimensions(raw_bytes) {
+                                                return JobResult {
+                                                    target: target_name.clone(),
+                                                    report: None,
+                                                    error: Some(reason),
+                                                };
+                                            }
+
                                             let report = SanitizationReport {
                                                 input_source: target_name.clone(),
                                                 status: "Clean".to_string(),
@@ -217,13 +239,42 @@ impl Worker {
                                             return JobResult { target: target_name.clone(), report: Some(report), error: None };
                                         },
                                         DetectedType::Pdf => {
-                                            let report = SanitizationReport {
-                                                input_source: target_name.clone(),
-                                                status: "Clean".to_string(),
-                                                actions: vec![],
-                                                sanitized_html: "PDF Document (Placeholder)".to_string(),
-                                            };
-                                            return JobResult { target: target_name.clone(), report: Some(report), error: None };
+                                            // =======================================================
+                                            // IMPLEMENTAZIONE: "lopdf mode" (Stripping)
+                                            // =======================================================
+                                            return match PdfValidator::sanitize_pdf(raw_bytes) {
+                                                Ok((_sanitized_pdf_bytes, report_actions)) => {
+                                                    let status = if report_actions.is_empty() {
+                                                        "Clean".to_string()
+                                                    } else {
+                                                        "Cleaned".to_string()
+                                                    };
+
+                                                    // Decidiamo il testo prima di "consumare" (move) lo status
+                                                    let html_placeholder = if status == "Clean" {
+                                                        "PDF Document (Placeholder)".to_string()
+                                                    } else {
+                                                        "PDF Document (Sanitized: Active Content Stripped)".to_string()
+                                                    };
+
+                                                    let report = SanitizationReport {
+                                                        input_source: target_name.clone(),
+                                                        status, // Qui status viene "spostato" dentro la struct in modo sicuro
+                                                        actions: report_actions,
+                                                        sanitized_html: html_placeholder,
+                                                    };
+
+                                                    return JobResult { target: target_name.clone(), report: Some(report), error: None };
+                                                },
+                                                Err(e) => {
+                                                    // Se il PDF è malformato (es. l'attaccante ha creato un PDF falso per confondere il parser)
+                                                    JobResult {
+                                                        target: target_name.clone(),
+                                                        report: None,
+                                                        error: Some(e),
+                                                    }
+                                                }
+                                            }
                                         },
                                         DetectedType::Unknown => {
                                             if target_name.contains("/css/") || target_name.ends_with(".css") {

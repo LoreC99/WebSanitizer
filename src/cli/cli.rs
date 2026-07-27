@@ -4,7 +4,7 @@ use clap::{Parser, ArgAction};
 #[derive(Parser, Debug)]
 #[command(
     name = "web-sanitizer",
-    author = "Studente <email@studenti.unibo.it>", // Adatta con i tuoi dati
+    author = "Chiara De Rinaldis e Lorenzo Canova",
     version,
     about = "Un web sanitizer concorrente e sicuro in Rust",
     long_about = "Applicazione CLI che analizza, pulisce e neutralizza contenuti web (HTML, URL, asset) \
