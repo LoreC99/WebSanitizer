@@ -1,4 +1,9 @@
 use regex::Regex;
+<<<<<<< Updated upstream
+=======
+use crate::config::loader::{ResourcePolicy};
+use crate::report::report::SanitizationAction;
+>>>>>>> Stashed changes
 
 /// Sanitizzatore dedicato ai fogli di stile CSS (sia inline nei tag <style> che file esterni .css)
 pub struct CssSanitizer;
@@ -40,7 +45,9 @@ pub enum DetectedType {
     Html,
     Png,
     Pdf,
+    Gzip,
     Unknown,
+    Xml,
 }
 
 pub struct MimeSniffer;
@@ -91,7 +98,316 @@ impl MimeSniffer {
             }
         }
 
+        // 4. controllo per gzip
+        // Alcuni server restituiscono contenuti compressi. I file gzip iniziano con 0x1F 0x8B
+        if raw_data.starts_with(&[0x1F, 0x8B]) {
+            return DetectedType::Gzip;
+        }
+
+        // 5. controllo per XML
+        // Gli XML iniziano con <?xml
+        if raw_data.starts_with(b"<?xml") {
+            return DetectedType::Xml;
+        }
+
         // Se non corrisponde a nulla di noto, lo classifichiamo come sconosciuto
         DetectedType::Unknown
     }
 }
+<<<<<<< Updated upstream
+=======
+
+pub struct ResourceGuard {
+    config: ResourcePolicy,       // max_depth, max_resource_size (e un futuro max_requests)
+    requests_made: usize,          // contatore richieste già effettuate
+}
+
+pub enum RefusalReason {
+    // --- controlli generali di rete/risorse ---
+    MaxDepthExceeded { current: usize, limit: usize },
+    MaxRequestsExceeded { current: usize, limit: usize },
+    ResourceTooLarge { size: usize, limit: u64 },
+    FetchingDisabled,
+    
+    // --- controlli su immagini (png) ---
+    ImageDimensionsExceeded { width: u32, height: u32, limit: u32 },
+    MalformedImageHeader { bytes_available: usize, bytes_needed: usize },
+    
+    // --- controlli su documenti attivi (pdf) ---
+    ActiveContentDetected { content_type: String, details: String },
+
+    // --- controlli DoS Bombs (Gzip e XML) ---
+    DecompressionBombDetected { details: String },
+    XmlEntityExpansionBomb { details: String },
+}
+
+//FORSE GIA IMPLEMETATO IN URL FETCHER? INPUT/URL.RS
+impl ResourceGuard {
+    pub fn new(config: ResourcePolicy) -> Self {
+        Self { config, requests_made: 0 }
+    }
+
+    /// Chiamata PRIMA di fare la fetch di una sub-risorsa.
+    /// current_depth: quanto siamo annidati (0 = risorsa diretta del documento principale)
+    pub fn check_before_fetch(&self, current_depth: usize) -> Result<(), RefusalReason> {
+        
+        const MAX_REQUESTS: usize = 20;
+        // 1. fetch_resources è disabilitato?
+        if self.config.fetch_resources == false {
+            return Err(RefusalReason::FetchingDisabled);
+        }
+        // 2. current_depth supera self.config.max_depth?
+        if current_depth as u8 >= self.config.max_depth {
+            return Err(RefusalReason::MaxDepthExceeded {
+                current: current_depth,
+                limit: self.config.max_depth as usize,
+            });
+        }
+        // 3. self.requests_made ha già raggiunto un massimo?
+        if self.requests_made >= MAX_REQUESTS {
+            return Err(RefusalReason::MaxRequestsExceeded {
+                current: self.requests_made,
+                limit: MAX_REQUESTS,
+            });
+        }
+        Ok(())
+
+    }
+
+    /// Chiamata DOPO aver scaricato i byte, prima di processarli.
+    pub fn check_response_size(&self, byte_len: usize) -> Result<(), RefusalReason> {
+        // confronta byte_len con self.config.max_resource_size
+        if byte_len as u64 > self.config.max_resource_size {
+            return Err(RefusalReason::ResourceTooLarge {
+                size: byte_len,
+                limit: self.config.max_resource_size,
+            });
+        }
+        Ok(())
+    }
+
+    /// Chiamata dopo un fetch riuscito, per aggiornare lo stato interno
+    pub fn record_request(&mut self) {
+        self.requests_made += 1;
+    }
+}
+
+
+pub struct PdfSanitizer;
+
+#[derive(Debug, PartialEq)]
+pub enum PdfCheckResult {
+    Clean,
+    ActiveContentDetected { details: String },
+    InvalidFormat,
+}
+
+impl PdfSanitizer {
+    /// Ispeziona i byte del PDF alla ricerca di codice attivo o trigger automatici
+    pub fn check_active_content(raw_data: &[u8]) -> PdfCheckResult {
+        if !raw_data.starts_with(b"%PDF-") {
+            return PdfCheckResult::InvalidFormat;
+        }
+
+        let suspicious_triggers: [&[u8]; 2] = [b"/OpenAction", b"/AA"];
+        let suspicious_actions: [&[u8]; 3] = [b"/JavaScript", b"/JS", b"/Launch"];
+
+        let has_trigger = suspicious_triggers.iter().any(|pattern| {
+            raw_data.windows(pattern.len()).any(|window| window == *pattern)
+        });
+        let has_action = suspicious_actions.iter().any(|pattern| {
+            raw_data.windows(pattern.len()).any(|window| window == *pattern)
+        });
+
+        if has_trigger || has_action {
+            PdfCheckResult::ActiveContentDetected {
+                details: "Rilevato codice JavaScript / OpenAction nel PDF".to_string(),
+            }
+        } else {
+            PdfCheckResult::Clean
+        }
+    }
+}
+
+pub struct ImageSanitizer;
+
+#[derive(Debug, PartialEq)]
+pub enum ImageCheckResult {
+    Valid { width: u32, height: u32 },
+    DimensionBomb { width: u32, height: u32 },
+    InvalidFormat,
+}
+
+impl ImageSanitizer {
+    pub const MAX_DIMENSION: u32 = 4096; // Max 4096px
+
+    /// Ispeziona i byte di un PNG ed estrae larghezza e altezza senza caricare l'immagine in RAM
+    pub fn check_dimensions(bytes: &[u8]) -> ImageCheckResult {
+        // Controllo Signature PNG (8 byte) + IHDR header (almeno 24 byte totali)
+        if bytes.len() >= 24 && bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) {
+            let width = u32::from_be_bytes(bytes[16..20].try_into().unwrap());
+            let height = u32::from_be_bytes(bytes[20..24].try_into().unwrap());
+
+            if width > Self::MAX_DIMENSION || height > Self::MAX_DIMENSION {
+                ImageCheckResult::DimensionBomb { width, height }
+            } else {
+                ImageCheckResult::Valid { width, height }
+            }
+        } else {
+            ImageCheckResult::InvalidFormat
+        }
+    }
+}
+
+pub struct XmlSanitizer;
+
+//Servono regole per analizzare file application/xml o .svg e rifiutare file che usano l'espansione delle entità <!ENTITY> (Billion Laughs Bomb).
+impl XmlSanitizer {
+    pub fn check_xml_bomb(raw_bytes: &[u8]) -> Result<(), String> {
+        let content = String::from_utf8_lossy(raw_bytes);
+        // Se contiene molte dichiarazioni ENTITY nidificate, rifiuta per DoS
+        if content.contains("<!ENTITY") && content.matches("ENTITY").count() > 5 {
+            return Err("REJECTED: XML Entity Expansion Bomb (Billion Laughs)".to_string());
+        }
+        Ok(())
+    }
+}
+
+pub struct GzipGuard;
+
+impl GzipGuard {
+    /// Riconosce i Magic Bytes di un file GZIP (0x1F 0x8B)
+    pub fn is_gzip(bytes: &[u8]) -> bool {
+        bytes.starts_with(&[0x1F, 0x8B])
+    }
+}
+
+// in resource_rules.rs, o in report.rs se preferisci tenerlo centralizzato
+impl From<RefusalReason> for SanitizationAction {
+    fn from(reason: RefusalReason) -> Self {
+        let (rule_fired, description) = match reason {
+            RefusalReason::FetchingDisabled =>
+                ("FETCH_DISABLED".to_string(), "Fetch delle sub-risorse disabilitato dalla policy".to_string()),
+            RefusalReason::MaxDepthExceeded { current, limit } =>
+                ("MAX_DEPTH_EXCEEDED".to_string(), format!("Profondità {} supera il limite {}", current, limit)),
+            RefusalReason::MaxRequestsExceeded { current, limit } =>
+                ("MAX_REQUESTS_EXCEEDED".to_string(), format!("{} richieste, limite {}", current, limit)),
+            RefusalReason::ResourceTooLarge { size, limit } =>
+                ("RESOURCE_TOO_LARGE".to_string(), format!("{} byte, limite {}", size, limit)),
+            RefusalReason::ImageDimensionsExceeded { width, height, limit } =>
+                ("IMAGE_DIMENSIONS_EXCEEDED".to_string(), format!("{}x{} pixel, limite {}", width, height, limit)),
+            RefusalReason::MalformedImageHeader { bytes_available, bytes_needed } =>
+                ("MALFORMED_IMAGE_HEADER".to_string(), format!("{} byte disponibili, ne servivano {}", bytes_available, bytes_needed)),
+            RefusalReason::ActiveContentDetected { content_type, details } =>
+                ("ACTIVE_CONTENT_DETECTED".to_string(), format!("{}: {}", content_type, details)),
+            
+            // Nuove varianti:
+            RefusalReason::DecompressionBombDetected { details } =>
+                ("DECOMPRESSION_BOMB_DETECTED".to_string(), details),
+            RefusalReason::XmlEntityExpansionBomb { details } =>
+                ("XML_ENTITY_EXPANSION_BOMB".to_string(), details),
+        };
+
+        SanitizationAction {
+            rule_fired,
+            location: "resource-fetch".to_string(),
+            original_fragment: description,
+            replacement: "Rifiutato".to_string(),
+        }
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_resource_guard_fetch_disabled() {
+        let config = ResourcePolicy {
+            fetch_resources: false,
+            max_depth: 3,
+            max_resource_size: 1024,
+        };
+        let guard = ResourceGuard::new(config);
+
+        assert!(guard.check_before_fetch(0).is_err()); // fetch disabilitato
+    }
+    #[test]
+    fn test_resource_guard_depth_limit() {
+        let config = ResourcePolicy {
+            fetch_resources: true,
+            max_depth: 3,
+            max_resource_size: 1024,
+        };
+        let guard = ResourceGuard::new(config);
+
+        assert!(guard.check_before_fetch(0).is_ok());
+        assert!(guard.check_before_fetch(2).is_ok());
+        assert!(guard.check_before_fetch(3).is_err()); // superato il limite
+    }
+    #[test]
+    fn test_resource_guard_size_limit() {
+        let config = ResourcePolicy {
+            fetch_resources: true,
+            max_depth: 3,
+            max_resource_size: 1024,
+        };
+        let guard = ResourceGuard::new(config);
+
+        assert!(guard.check_response_size(512).is_ok());
+        assert!(guard.check_response_size(1024).is_ok());
+        assert!(guard.check_response_size(2048).is_err()); // superato il limite
+    }
+    #[test]
+    fn test_resource_guard_request_limit() {
+        let config = ResourcePolicy {
+            fetch_resources: true,
+            max_depth: 3,
+            max_resource_size: 1024,
+        };
+        let mut guard = ResourceGuard::new(config);
+
+        for _ in 0..20 {
+            guard.record_request();
+        }
+        assert!(guard.check_before_fetch(0).is_err()); // superato il limite di richieste
+
+    }
+        #[test]
+    fn test_png_dimension_check() {
+        let valid_png: [u8; 24] = [
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // Magic bytes
+            0x00, 0x00, 0x00, 0x0D, // Length of IHDR chunk
+            0x49, 0x48, 0x44, 0x52, // "IHDR"
+            0x00, 0x00, 0x01, 0x00, // Width: 256
+            0x00, 0x00, 0x01, 0x00, // Height: 256
+        ];
+        assert_eq!(
+            ImageSanitizer::check_dimensions(&valid_png), 
+            ImageCheckResult::Valid { width: 256, height: 256 }
+        );
+
+        let bomb_png: [u8; 24] = [
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // Magic bytes
+            0x00, 0x00, 0x00, 0x0D, // Length of IHDR chunk
+            0x49, 0x48, 0x44, 0x52, // "IHDR"
+            0x00, 0x00, 0x10, 0x01, // Width: 4097 (supera il limite di 4096)
+            0x00, 0x00, 0x10, 0x00, // Height: 4096
+        ];
+        assert_eq!(
+            ImageSanitizer::check_dimensions(&bomb_png), 
+            ImageCheckResult::DimensionBomb { width: 4097, height: 4096 }
+        );
+    }
+    #[test]
+    fn test_pdf_active_content_check() {
+        let pdf_with_js = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog /OpenAction 5 0 R >>\nendobj\n5 0 obj\n<< /S /JavaScript /JS (app.alert('ciao');) >>\nendobj\n";
+        assert_ne!(PdfSanitizer::check_active_content(pdf_with_js), PdfCheckResult::Clean);
+
+        let pdf_without_js = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n";
+        assert_eq!(PdfSanitizer::check_active_content(pdf_without_js), PdfCheckResult::Clean);
+    }
+    
+}
+>>>>>>> Stashed changes

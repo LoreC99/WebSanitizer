@@ -13,7 +13,11 @@ use crate::parser::html::HtmlParser;
 use crate::sanitizer::engine::SanitizerEngine;
 use crate::sanitizer::html_rules::{DangerousAttributeRule, IdnHomographRule, MetaRefreshRule, SsrfAttributeRule, TagAllowListRule};
 use crate::report::{SanitizationAction, SanitizationReport};
+<<<<<<< Updated upstream
 use crate::sanitizer::resource_rules::{CssSanitizer, MimeSniffer, DetectedType};
+=======
+use crate::sanitizer::resource_rules::{CssSanitizer, MimeSniffer, DetectedType, ImageSanitizer, ImageCheckResult, PdfSanitizer, PdfCheckResult};
+>>>>>>> Stashed changes
 
 // ==========================================
 // 1. STATO CONDIVISO (Shared State)
@@ -208,6 +212,7 @@ impl Worker {
                                     match detected_type {
                                         DetectedType::Html => { is_html = true; },
                                         DetectedType::Png => {
+<<<<<<< Updated upstream
                                             let report = SanitizationReport {
                                                 input_source: target_name.clone(),
                                                 status: "Clean".to_string(),
@@ -224,6 +229,64 @@ impl Worker {
                                                 sanitized_html: "PDF Document (Placeholder)".to_string(),
                                             };
                                             return JobResult { target: target_name.clone(), report: Some(report), error: None };
+=======
+                                            match ImageSanitizer::check_dimensions(raw_bytes) {
+                                                ImageCheckResult::DimensionBomb { width, height } => {
+                                                    // Rifiuta l'immagine perché supera le dimensioni di sicurezza (Dimension Bomb)
+                                                    return JobResult {
+                                                        target: target_name.clone(),
+                                                        report: None,
+                                                        error: Some(format!("REJECTED: Image Dimension Bomb ({}x{} px)", width, height)),
+                                                    };
+                                                },
+                                                _ => {
+                                                    // Immagine sicura
+                                                    let report = SanitizationReport {
+                                                        input_source: target_name.clone(),
+                                                        status: "Clean".to_string(),
+                                                        actions: vec![],
+                                                        sanitized_html: "PNG Image (Validated)".to_string(),
+                                                    };
+                                                    return JobResult { target: target_name.clone(), report: Some(report), error: None };
+                                                }
+                                            }
+>>>>>>> Stashed changes
+                                        },
+                                        DetectedType::Pdf => {
+                                            match PdfSanitizer::check_active_content(raw_bytes) {
+                                                PdfCheckResult::ActiveContentDetected { details } => {
+                                                    return JobResult {
+                                                        target: target_name.clone(),
+                                                        report: None,
+                                                        error: Some(format!("REJECTED: PDF Active Content ({})", details)),
+                                                    };
+                                                },
+                                                _ => {
+                                                    let report = SanitizationReport {
+                                                        input_source: target_name.clone(),
+                                                        status: "Clean".to_string(),
+                                                        actions: vec![],
+                                                        sanitized_html: "PDF Document (Validated)".to_string(),
+                                                    };
+                                                    return JobResult { target: target_name.clone(), report: Some(report), error: None };
+                                                }
+                                            }
+                                        },
+                                        DetectedType::Gzip => {
+                                            // Rifiuta la risposta prima di decomprimerla (Protezione da Decompression Bomb)
+                                            return JobResult {
+                                                target: target_name.clone(),
+                                                report: None,
+                                                error: Some("REJECTED: Decompression Bomb / Gzip payload detected".to_string()),
+                                            };
+                                        },
+                                        DetectedType::Xml => {
+                                            // Rifiuta la risposta XML (Protezione da XXE e altre vulnerabilità)
+                                            return JobResult {
+                                                target: target_name.clone(),
+                                                report: None,
+                                                error: Some("REJECTED: XML content detected (potential XXE)".to_string()),
+                                            };
                                         },
                                         DetectedType::Unknown => {
                                             if target_name.contains("/css/") || target_name.ends_with(".css") {

@@ -367,3 +367,74 @@ impl SanitizationRule for IdnHomographRule {
         None
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    // Importa il trait per poterlo usare nel test
+    use crate::sanitizer::SanitizationRule; 
+    use crate::parser::Node;
+    
+
+    #[test]
+    fn test_html_rules_tagallowed_executes_rules() {
+        let config = HtmlPolicy {
+            allow_scripts: true,
+            remove_iframes: false,
+            block_meta_refresh: false,
+            allowed_tags: vec!["div".to_string(), "p".to_string()],
+        };
+        let rule = TagAllowListRule { config };
+
+        // Test con input che scatena la regola
+        let mut node = Node::element("script");
+        let report = rule.apply(&mut node, "html > body[0] > script[0]");
+        assert!(report.is_some());
+        assert_eq!(report.unwrap().rule_fired, "TAG_NOT_ALLOW_LISTED");
+
+        // Test con input pulito
+        let mut clean_node = Node::element("div");
+        let report_clean = rule.apply(&mut clean_node, "html > body[0] > div[0]");
+
+        assert!(report_clean.is_none());
+        
+    }
+
+    #[test]
+    fn test_html_rules_meta_refresh_executes_rules() {
+        let config = HtmlPolicy {
+            allow_scripts: true,
+            remove_iframes: false,
+            block_meta_refresh: true,
+            allowed_tags: vec!["div".to_string(), "p".to_string()],
+        };
+        let rule = MetaRefreshRule { config };
+
+        // Test con input che scatena la regola, dangerous attributes: meta http-equiv="refresh" 
+        let mut vett = Vec::new();
+        vett.push(("http-equiv".to_string(), "refresh".to_string()));
+        vett.push(("content".to_string(), "5; url=http://evil.com".to_string()));
+
+        let mut node = Node::element("meta");
+        if let Node::Element { attributes, .. } = &mut node {
+            *attributes = vett;
+        }
+        let report = rule.apply(&mut node, "html > body[0] > meta[0]");
+        assert!(report.is_some());
+        assert_eq!(report.unwrap().rule_fired, "META_REFRESH_REMOVED");
+
+        // Test con input pulito
+        let mut safe = Vec::new();
+        safe.push(("charset".to_string(), "utf-8".to_string()));
+
+        let mut clean_node = Node::element("meta");
+        if let Node::Element { attributes, .. } = &mut clean_node {
+            *attributes = safe;
+        }
+
+        let report_clean = rule.apply(&mut clean_node, "html > body[0] > meta[1]");
+        assert!(report_clean.is_none());
+        
+    }
+    
+}
