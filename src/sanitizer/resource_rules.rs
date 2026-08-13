@@ -42,7 +42,9 @@ pub enum DetectedType {
     Html,
     Png,
     Pdf,
+    Gzip,
     Unknown,
+    Xml,
 }
 
 pub struct MimeSniffer;
@@ -91,6 +93,18 @@ impl MimeSniffer {
             {
                 return DetectedType::Html;
             }
+        }
+
+        // 4. controllo per gzip
+        // Alcuni server restituiscono contenuti compressi. I file gzip iniziano con 0x1F 0x8B
+        if raw_data.starts_with(&[0x1F, 0x8B]) {
+            return DetectedType::Gzip;
+        }
+
+        // 5. controllo per XML
+        // Gli XML iniziano con <?xml
+        if raw_data.starts_with(b"<?xml") {
+            return DetectedType::Xml;
         }
 
         // Se non corrisponde a nulla di noto, lo classifichiamo come sconosciuto

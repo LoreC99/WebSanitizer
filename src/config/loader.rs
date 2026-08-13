@@ -89,6 +89,7 @@ mod tests {
             [html]
             allow_scripts = true
             remove_iframes = false
+            block_meta_refresh = true
             allowed_tags = ["html", "p", "a"]
 
             [url]
