@@ -1,9 +1,7 @@
 use regex::Regex;
-<<<<<<< Updated upstream
-=======
 use crate::config::loader::{ResourcePolicy};
 use crate::report::report::SanitizationAction;
->>>>>>> Stashed changes
+
 
 /// Sanitizzatore dedicato ai fogli di stile CSS (sia inline nei tag <style> che file esterni .css)
 pub struct CssSanitizer;
@@ -114,8 +112,6 @@ impl MimeSniffer {
         DetectedType::Unknown
     }
 }
-<<<<<<< Updated upstream
-=======
 
 pub struct ResourceGuard {
     config: ResourcePolicy,       // max_depth, max_resource_size (e un futuro max_requests)
@@ -410,4 +406,4 @@ mod tests {
     }
     
 }
->>>>>>> Stashed changes
+

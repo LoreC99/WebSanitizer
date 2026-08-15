@@ -1,6 +1,5 @@
-use std::collections::HashSet;
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{mpsc, Arc, Mutex, RwLock};
+use std::sync::atomic::{Ordering};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use tokio::runtime::Builder;
 use crate::cli::cli::Cli;
@@ -9,55 +8,13 @@ use crate::cli::cli::Cli;
 // ==========================================
 use crate::config::loader;
 use crate::input::url::UrlFetcher;
-use crate::parser::html::HtmlParser;
-use crate::sanitizer::engine::SanitizerEngine;
-use crate::sanitizer::html_rules::{DangerousAttributeRule, IdnHomographRule, MetaRefreshRule, SsrfAttributeRule, TagAllowListRule};
-use crate::report::{SanitizationAction, SanitizationReport};
-<<<<<<< Updated upstream
-use crate::sanitizer::resource_rules::{CssSanitizer, MimeSniffer, DetectedType};
-=======
-use crate::sanitizer::resource_rules::{CssSanitizer, MimeSniffer, DetectedType, ImageSanitizer, ImageCheckResult, PdfSanitizer, PdfCheckResult};
->>>>>>> Stashed changes
+use crate::sanitizer::resource_rules::{MimeSniffer};
+use crate::input::file::FileReader;
+pub use crate::scheduler::{Job, JobResult, SharedState};
+use crate::utils::utils::{evaluate_mime_type, process_css, process_html};
 
 // ==========================================
-// 1. STATO CONDIVISO (Shared State)
-// ==========================================
-
-pub struct SharedState {
-    pub resolved_urls: RwLock<HashSet<String>>,
-    pub block_list: RwLock<HashSet<String>>,
-    pub total_processed: AtomicU32,
-    pub threats_removed: AtomicU32,
-}
-
-impl SharedState {
-    pub fn new(initial_block_list: HashSet<String>) -> Self {
-        Self {
-            resolved_urls: RwLock::new(HashSet::new()),
-            block_list: RwLock::new(initial_block_list),
-            total_processed: AtomicU32::new(0),
-            threats_removed: AtomicU32::new(0),
-        }
-    }
-}
-
-// ==========================================
-// 2. DEFINIZIONE DEL TASK E DEL REPORT
-// ==========================================
-
-pub enum Job {
-    Url(String),
-    File(String),
-}
-
-pub struct JobResult {
-    pub target: String,
-    pub report: Option<SanitizationReport>,
-    pub error: Option<String>,
-}
-
-// ==========================================
-// 3. IL THREAD POOL E I WORKER
+// IL THREAD POOL E I WORKER
 // ==========================================
 
 pub struct ThreadPool {
@@ -75,7 +32,7 @@ impl ThreadPool {
         size: usize,
         shared_state: Arc<SharedState>,
         result_sender: mpsc::Sender<JobResult>,
-        config: Arc<Cli> // <--- 1. AGGIUNTO QUI
+        config: Arc<Cli>
     ) -> ThreadPool {
         assert!(size > 0);
         let (sender, receiver) = mpsc::channel();
@@ -88,7 +45,7 @@ impl ThreadPool {
                 Arc::clone(&receiver),
                 Arc::clone(&shared_state),
                 result_sender.clone(),
-                Arc::clone(&config), // <--- 2. PASSATO AL WORKER CLONANDO L'ARC
+                Arc::clone(&config),
             ));
         }
 
@@ -122,19 +79,14 @@ impl Worker {
         receiver: Arc<Mutex<mpsc::Receiver<Job>>>,
         state: Arc<SharedState>,
         result_sender: mpsc::Sender<JobResult>,
-        config: Arc<Cli>, // <--- 3. RICEVUTO QUI DAL WORKER
+        config: Arc<Cli>,
     ) -> Worker {
         let thread = thread::spawn(move || {
-            // Dato che usiamo la keyword "move", l'Arc<Cli> di nome "config"
-            // viene spostato all'interno del thread e ora può essere usato!
-
-            // 1. Creazione del Runtime Tokio
             let rt = Builder::new_current_thread()
                 .enable_all()
                 .build()
                 .expect("Impossibile creare il runtime Tokio per il worker");
 
-            // Carichiamo la policy: se l'utente ha passato un file usiamo quello, altrimenti fallback al default
             let policy = match &config.policy_path {
                 Some(path) => {
                     match loader::load_policy(path) {
@@ -149,7 +101,6 @@ impl Worker {
                     }
                 },
                 None => {
-                    // Nessun file passato da terminale, usiamo la policy integrata
                     loader::default_policy()
                 }
             };
@@ -159,7 +110,6 @@ impl Worker {
 
                 match message {
                     Ok(job) => {
-                        // Estraiamo il nome del target
                         let target_name = match &job {
                             Job::Url(u) => u.clone(),
                             Job::File(f) => f.clone(),
@@ -167,13 +117,12 @@ impl Worker {
 
                         println!("Worker {} sta analizzando: {}", id, target_name);
 
-                        // Esecuzione bloccante del motore asincrono all'interno del worker
                         let job_result = rt.block_on(async {
 
                             // 1. ASTRAZIONE DELL'INPUT: Rete o File Locale?
                             let fetch_result = match job {
                                 Job::Url(url) => {
-                                    // Inizializziamo il fetcher solo se ci serve la rete
+                                    // IL FETCH DI RETE USA GIÀ CORRETTAMENTE UrlFetcher
                                     let fetcher = match UrlFetcher::new(
                                         config.max_bytes,
                                         config.max_depth,
@@ -182,7 +131,6 @@ impl Worker {
                                     ) {
                                         Ok(f) => f,
                                         Err(e) => {
-                                            // Restituiamo direttamente JobResult invece di Err()
                                             return JobResult {
                                                 target: target_name.clone(),
                                                 report: None,
@@ -191,190 +139,42 @@ impl Worker {
                                         }
                                     };
 
-                                    // Chiamata asincrona di rete
                                     fetcher.fetch(&url, 0).await.map_err(|e| format!("Errore Rete: {}", e))
                                 },
                                 Job::File(filepath) => {
-                                    // Lettura sincrona/locale dal file system (senza limiti di rete applicati qui)
-                                    std::fs::read_to_string(&filepath).map_err(|e| format!("Errore Lettura File: {}", e))
+                                    // ========================================================
+                                    // Utilizzo di FileReader al posto di std::fs
+                                    // ========================================================
+                                    let reader = FileReader::new(config.max_bytes);
+
+                                    reader.read(std::path::Path::new(&filepath))
+                                        .await
+                                        .map_err(|e| format!("Errore Lettura File (DoS Prevention): {}", e))
                                 }
                             };
-
-                            // 2. ANALISI DEL CONTENUTO SCARICATO/LETTO
                             match fetch_result {
-                                Ok(raw_content) => {
-                                    let raw_bytes = raw_content.as_bytes();
+                                Ok(raw_bytes_vec) => {
+                                    let raw_bytes = raw_bytes_vec.as_slice();
+
+                                    // Sniffiamo i byte PURI, così il GZIP verrà finalmente riconosciuto!
                                     let detected_type = MimeSniffer::sniff(raw_bytes);
 
-                                    let mut is_css = false;
-                                    let mut is_html = false;
-
-                                    match detected_type {
-                                        DetectedType::Html => { is_html = true; },
-                                        DetectedType::Png => {
-<<<<<<< Updated upstream
-                                            let report = SanitizationReport {
-                                                input_source: target_name.clone(),
-                                                status: "Clean".to_string(),
-                                                actions: vec![],
-                                                sanitized_html: "PNG Image (Placeholder)".to_string(),
-                                            };
-                                            return JobResult { target: target_name.clone(), report: Some(report), error: None };
-                                        },
-                                        DetectedType::Pdf => {
-                                            let report = SanitizationReport {
-                                                input_source: target_name.clone(),
-                                                status: "Clean".to_string(),
-                                                actions: vec![],
-                                                sanitized_html: "PDF Document (Placeholder)".to_string(),
-                                            };
-                                            return JobResult { target: target_name.clone(), report: Some(report), error: None };
-=======
-                                            match ImageSanitizer::check_dimensions(raw_bytes) {
-                                                ImageCheckResult::DimensionBomb { width, height } => {
-                                                    // Rifiuta l'immagine perché supera le dimensioni di sicurezza (Dimension Bomb)
-                                                    return JobResult {
-                                                        target: target_name.clone(),
-                                                        report: None,
-                                                        error: Some(format!("REJECTED: Image Dimension Bomb ({}x{} px)", width, height)),
-                                                    };
-                                                },
-                                                _ => {
-                                                    // Immagine sicura
-                                                    let report = SanitizationReport {
-                                                        input_source: target_name.clone(),
-                                                        status: "Clean".to_string(),
-                                                        actions: vec![],
-                                                        sanitized_html: "PNG Image (Validated)".to_string(),
-                                                    };
-                                                    return JobResult { target: target_name.clone(), report: Some(report), error: None };
-                                                }
-                                            }
->>>>>>> Stashed changes
-                                        },
-                                        DetectedType::Pdf => {
-                                            match PdfSanitizer::check_active_content(raw_bytes) {
-                                                PdfCheckResult::ActiveContentDetected { details } => {
-                                                    return JobResult {
-                                                        target: target_name.clone(),
-                                                        report: None,
-                                                        error: Some(format!("REJECTED: PDF Active Content ({})", details)),
-                                                    };
-                                                },
-                                                _ => {
-                                                    let report = SanitizationReport {
-                                                        input_source: target_name.clone(),
-                                                        status: "Clean".to_string(),
-                                                        actions: vec![],
-                                                        sanitized_html: "PDF Document (Validated)".to_string(),
-                                                    };
-                                                    return JobResult { target: target_name.clone(), report: Some(report), error: None };
-                                                }
-                                            }
-                                        },
-                                        DetectedType::Gzip => {
-                                            // Rifiuta la risposta prima di decomprimerla (Protezione da Decompression Bomb)
-                                            return JobResult {
-                                                target: target_name.clone(),
-                                                report: None,
-                                                error: Some("REJECTED: Decompression Bomb / Gzip payload detected".to_string()),
-                                            };
-                                        },
-                                        DetectedType::Xml => {
-                                            // Rifiuta la risposta XML (Protezione da XXE e altre vulnerabilità)
-                                            return JobResult {
-                                                target: target_name.clone(),
-                                                report: None,
-                                                error: Some("REJECTED: XML content detected (potential XXE)".to_string()),
-                                            };
-                                        },
-                                        DetectedType::Unknown => {
-                                            if target_name.contains("/css/") || target_name.ends_with(".css") {
-                                                is_css = true;
-                                            } else {
-                                                is_html = true;
-                                            }
-                                        }
+                                    // 1. Valutazione tipi binari o pericolosi
+                                    if let Some(binary_result) = evaluate_mime_type(&detected_type, raw_bytes, &target_name) {
+                                        return binary_result;
                                     }
 
+                                    // 2. Se siamo arrivati qui, è sicuro. ORA possiamo convertirlo in stringa.
+                                    let raw_content = String::from_utf8_lossy(raw_bytes).to_string();
+
+                                    // 3. Valutazione CSS
+                                    let is_css = target_name.contains("/css/") || target_name.ends_with(".css");
                                     if is_css {
-                                        let sanitized_css = CssSanitizer::sanitize(&raw_content);
-                                        let mut report_actions = Vec::new();
-                                        if sanitized_css != raw_content {
-                                            report_actions.push(SanitizationAction {
-                                                rule_fired: "MALICIOUS_CSS_SANITIZED".to_string(),
-                                                location: "Stylesheet".to_string(),
-                                                original_fragment: "Active CSS Vectors".to_string(),
-                                                replacement: "Stripped".to_string(),
-                                            });
-                                        }
-                                        let status = if report_actions.is_empty() { "Clean".to_string() } else { "Cleaned".to_string() };
-                                        let report = SanitizationReport {
-                                            input_source: target_name.clone(),
-                                            status,
-                                            actions: report_actions,
-                                            sanitized_html: sanitized_css,
-                                        };
-                                        return JobResult { target: target_name.clone(), report: Some(report), error: None };
+                                        return process_css(&raw_content, &target_name);
                                     }
 
-                                    if is_html {
-                                        let clean_raw_html = raw_content
-                                            .replace("<!doctype html>", "")
-                                            .replace("<!DOCTYPE html>", "")
-                                            .replace("<!DOCTYPE HTML>", "");
-
-                                        let mut parser = HtmlParser::new(&clean_raw_html);
-                                        return match parser.parse() {
-                                            Ok(dom) => {
-                                                let mut engine = SanitizerEngine::new();
-                                                let mut active_html_policy = policy.html.clone();
-
-                                                if active_html_policy.remove_iframes {
-                                                    active_html_policy.allowed_tags.retain(|tag| !["iframe", "object", "embed"].contains(&tag.as_str()));
-                                                }
-                                                if !active_html_policy.allow_scripts {
-                                                    active_html_policy.allowed_tags.retain(|tag| tag != "script");
-                                                }
-
-                                                engine.add_rule(Box::new(TagAllowListRule { config: active_html_policy.clone() }));
-                                                if active_html_policy.block_meta_refresh {
-                                                    engine.add_rule(Box::new(MetaRefreshRule { config: active_html_policy }));
-                                                }
-                                                engine.add_rule(Box::new(DangerousAttributeRule { url_config: policy.url.clone() }));
-                                                engine.add_rule(Box::new(SsrfAttributeRule { config: policy.url.clone() }));
-                                                engine.add_rule(Box::new(IdnHomographRule));
-
-                                                let (clean_dom, report_actions) = engine.run(dom);
-                                                let mut clean_html_string = String::new();
-                                                for node in clean_dom {
-                                                    clean_html_string.push_str(&node.to_html_string());
-                                                }
-
-                                                let status = if report_actions.is_empty() { "Clean".to_string() } else { "Cleaned".to_string() };
-                                                let report = SanitizationReport {
-                                                    input_source: target_name.clone(),
-                                                    status,
-                                                    actions: report_actions,
-                                                    sanitized_html: clean_html_string,
-                                                };
-                                                JobResult { target: target_name.clone(), report: Some(report), error: None }
-                                            },
-                                            Err(e) => {
-                                                JobResult {
-                                                    target: target_name.clone(),
-                                                    report: None,
-                                                    error: Some(format!("Errore HTML Parser: {:?}", e)),
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    JobResult {
-                                        target: target_name.clone(),
-                                        report: None,
-                                        error: Some("Fallback non gestito raggiunto.".to_string()),
-                                    }
+                                    // 4. Valutazione HTML (Default)
+                                    process_html(&raw_content, &target_name, &policy)
                                 }
                                 Err(e) => {
                                     JobResult {

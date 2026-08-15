@@ -4,21 +4,12 @@ use std::collections::HashSet;
 use std::sync::atomic::Ordering;
 use std::fs;
 use std::path::Path;
-// Importiamo le tue strutture
+// Importiamo le strutture
 use WebSanitizer::cli::cli::Cli;
 use WebSanitizer::scheduler::workers::{Job, SharedState, ThreadPool};
-use serde::Serialize;
-use WebSanitizer::report::SanitizationReport;
-use WebSanitizer::utils::utils::explore_directory;
-
-#[derive(Serialize)]
-pub struct BatchReport {
-    pub total_processed: u32,
-    pub total_threats_removed: u32,
-    pub success_count: u32,
-    pub error_count: u32,
-    pub detailed_results: Vec<SanitizationReport>,
-}
+use WebSanitizer::input::directory::DirectoryScanner;
+use WebSanitizer::report::report::BatchReport;
+use WebSanitizer::utils::utils::{save_batch_report, save_sanitized_html};
 
 fn main() {
     // 1. Parsing automatico degli argomenti da riga di comando
@@ -70,8 +61,29 @@ fn main() {
             if path.is_file() {
                 pool.execute(Job::File(target));
             } else if path.is_dir() {
-                println!("📂 Rilevata directory locale: {}. Scansione in corso...", target);
-                explore_directory(path, &pool);
+                println!("📁 Rilevata directory locale: {}. Scansione in corso...", target);
+
+                // ========================================================
+                // Utilizzo di DirectoryScanner al posto di std::fs
+                // ========================================================
+                let allowed_extensions = vec![
+                    "html".to_string(), "htm".to_string(),
+                    "css".to_string(), "txt".to_string()
+                ];
+
+                // Impostiamo limiti di sicurezza: max profondità 10, max 10.000 file
+                let scanner = DirectoryScanner::new(allowed_extensions, 10, 10000);
+
+                match scanner.scan(path) {
+                    Ok(safe_files) => {
+                        for f in safe_files {
+                            if let Some(path_str) = f.to_str() {
+                                pool.execute(Job::File(path_str.to_string()));
+                            }
+                        }
+                    }
+                    Err(e) => eprintln!("⚠️ Errore nella scansione della directory: {}", e),
+                }
             } else {
                 eprintln!("⚠️ Attenzione: L'input '{}' non è né un URL valido né un percorso locale esistente.", target);
             }
@@ -91,28 +103,11 @@ fn main() {
                 println!("❌ FALLITO: {} -> {}", result.target, error);
                 error_count += 1;
             } else if let Some(report) = result.report {
-                println!("✅ COMPLETATO: {} -> (Minacce rimosse: {})",
-                         result.target, report.actions.len());
+                println!("✅ COMPLETATO: {} -> (Minacce rimosse: {})", result.target, report.actions.len());
                 success_count += 1;
 
-                // ========================================================
-                // NUOVO: SALVATAGGIO DEL FILE HTML SANITIZZATO
-                // ========================================================
-
-                // 1. Creiamo un nome file sicuro a partire dall'URL
-                let safe_filename = result.target.replace(&['/', ':', '\\', '?', '&', '=', '#'][..], "_");
-
-                // 2. Uniamo il percorso della cartella di output con il nuovo nome
-                let file_path = cli_config.output_dir.join(format!("{}.html", safe_filename));
-
-                // 3. Scriviamo il contenuto pulito su disco
-                if let Err(e) = fs::write(&file_path, &report.sanitized_html) {
-                    eprintln!("   ⚠️ Errore nel salvare il file HTML per {}: {}", result.target, e);
-                } else {
-                    println!("   -> Contenuto pulito salvato in: {:?}", file_path);
-                }
-
-                // ========================================================
+                // Richiamo alla nuova funzione in utils.rs
+                save_sanitized_html(&cli_config.output_dir, &result.target, &report.sanitized_html);
 
                 all_reports.push(report);
             }
@@ -140,16 +135,6 @@ fn main() {
         detailed_results: all_reports,
     };
 
-    // Serializziamo in formato JSON leggibile ("pretty")
-    match serde_json::to_string_pretty(&batch_report) {
-        Ok(json_string) => {
-            // Scriviamo sul disco al percorso specificato dalla CLI (es. --report-file)
-            if let Err(e) = fs::write(&cli_config.report_file, json_string) {
-                eprintln!("❌ Errore durante il salvataggio del report su disco: {}", e);
-            } else {
-                println!("📄 Report JSON globale salvato con successo in: {:?}", cli_config.report_file);
-            }
-        },
-        Err(e) => eprintln!("❌ Errore durante la serializzazione del report JSON: {}", e),
-    }
+    // Un'unica e semplice riga
+    save_batch_report(&cli_config.report_file, &batch_report);
 }

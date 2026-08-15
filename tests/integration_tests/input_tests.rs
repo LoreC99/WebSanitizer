@@ -28,10 +28,15 @@ async fn test_url_download_and_sanitization_success() {
     let fetcher = UrlFetcher::new(1_000_000, 1, 5, Duration::from_secs(3))
         .expect("Inizializzazione UrlFetcher fallita");
 
-    //  Scarichiamo l'HTML dalla rete simulata
+    //  Scarichiamo i byte crudi dalla rete simulata
     let download_result = fetcher.fetch(&target_url, 0).await;
     assert!(download_result.is_ok(), "Il download dell'URL dovrebbe avere successo");
-    let html_content = download_result.unwrap();
+    let downloaded_bytes = download_result.unwrap();
+
+    // =========================================================
+    // NUOVO: Convertiamo i byte crudi in stringa UTF-8
+    // =========================================================
+    let html_content = String::from_utf8_lossy(&downloaded_bytes).to_string();
 
     //  Passiamo l'HTML scaricato alla pipeline di sanitizzazione
     let policy = default_policy();

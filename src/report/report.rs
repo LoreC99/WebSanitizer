@@ -26,6 +26,15 @@ pub struct SanitizationReport {
 /*Un singolo input (es. vecchio_sito.htm) può contenere molteplici violazioni (es. un tag script, un iframe malevolo, un link sospetto).
 Quindi: SanitizationReport contiene un Vec<SanitizationAction> (una lista di azioni). */
 
+#[derive(Serialize)]
+pub struct BatchReport {
+    pub total_processed: u32,
+    pub total_threats_removed: u32,
+    pub success_count: u32,
+    pub error_count: u32,
+    pub detailed_results: Vec<SanitizationReport>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

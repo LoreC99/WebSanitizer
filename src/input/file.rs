@@ -18,7 +18,7 @@ impl FileReader {
     }
 
     /// Legge il file in modo difensivo e restituisce il suo contenuto come stringa.
-    pub async fn read(&self, path: &Path) -> Result<String, Box<dyn Error>> {
+    pub async fn read(&self, path: &Path) -> Result<Vec<u8>, Box<dyn Error>> {
         // 1. Ispezione preventiva: otteniamo i metadati dal file system
         // senza caricare effettivamente il file in memoria.
         let file_metadata = fs::metadata(path).await?;
@@ -31,11 +31,7 @@ impl FileReader {
         // 3. Lettura: ora che siamo sicuri che il file rispetta i limiti, lo carichiamo in RAM.
         let file = read(path).await?;
 
-        // 4. Decodifica robusta: convertiamo i byte in stringa sostituendo eventuali
-        // byte non UTF-8 con caratteri speciali (), evitando panic se il file è binario.
-        let html_string = String::from_utf8_lossy(&file).to_string();
-
-        Ok(html_string)
+        Ok(file)
     }
 }
 
@@ -52,24 +48,6 @@ mod tests {
         path
     }
 
-    #[tokio::test]
-    async fn test_read_file_success() {
-        let path = get_temp_path("success.html");
-
-        // 1. Creiamo un file temporaneo valido
-        fs::write(&path, "<html><body>Tutto OK</body></html>").await.unwrap();
-
-        // 2. Leggiamo il file con un limite di byte ampio (1024)
-        let reader = FileReader::new(1024);
-        let result = reader.read(&path).await;
-
-        // 3. Verifichiamo il risultato
-        assert!(result.is_ok(), "La lettura del file valido deve avere successo");
-        assert_eq!(result.unwrap(), "<html><body>Tutto OK</body></html>");
-
-        // 4. Pulizia
-        fs::remove_file(&path).await.unwrap();
-    }
 
     #[tokio::test]
     async fn test_read_blocca_file_troppo_grandi() {
@@ -116,13 +94,37 @@ mod tests {
         let reader = FileReader::new(1024);
         let result = reader.read(&path).await;
 
-        // 2. Il programma non deve crashare.
-        // from_utf8_lossy deve sostituire il byte rotto con il simbolo  (U+FFFD)
+        // 2. Il programma non deve crashare e deve restituire i byte crudi.
         assert!(result.is_ok());
-        let stringa_letta = result.unwrap();
+        let bytes_letti = result.unwrap();
+
+        // Verifichiamo che il lettore abbia recuperato i byte esatti
+        assert_eq!(bytes_letti, bad_bytes);
+
+        // Simuliamo ciò che fa il worker: from_utf8_lossy deve sostituire il byte rotto con il simbolo (U+FFFD)
+        let stringa_letta = String::from_utf8_lossy(&bytes_letti).to_string();
         assert!(stringa_letta.contains('\u{FFFD}'), "Il carattere invalido doveva essere rimpiazzato dal simbolo di fallback");
 
         // 3. Pulizia
+        fs::remove_file(&path).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_read_file_success() {
+        let path = get_temp_path("success.html");
+
+        // 1. Creiamo un file temporaneo valido
+        fs::write(&path, "<html><body>Tutto OK</body></html>").await.unwrap();
+
+        // 2. Leggiamo il file con un limite di byte ampio (1024)
+        let reader = FileReader::new(1024);
+        let result = reader.read(&path).await;
+
+        // 3. Verifichiamo il risultato (ora confrontiamo con un array di byte usando b"...")
+        assert!(result.is_ok(), "La lettura del file valido deve avere successo");
+        assert_eq!(result.unwrap(), b"<html><body>Tutto OK</body></html>");
+
+        // 4. Pulizia
         fs::remove_file(&path).await.unwrap();
     }
 }

@@ -1,10 +1,10 @@
 use std::path::PathBuf;
-use clap::{Parser, ArgAction};
+use clap::{Parser};
 
 #[derive(Parser, Debug)]
 #[command(
     name = "web-sanitizer",
-    author = "Studente <email@studenti.unibo.it>", // Adatta con i tuoi dati
+    author = "Chiara De Rinaldis e Lorenzo Canova",
     version,
     about = "Un web sanitizer concorrente e sicuro in Rust",
     long_about = "Applicazione CLI che analizza, pulisce e neutralizza contenuti web (HTML, URL, asset) \
@@ -37,14 +37,6 @@ pub struct Cli {
         value_name = "FILE_PATH"
     )]
     pub policy_path: Option<PathBuf>,
-
-    /// Livello di verbosità dei log (es. -v info, -vv debug, -vvv trace)
-    #[arg(
-        short = 'v',
-        long = "verbose",
-        action = ArgAction::Count
-    )]
-    pub verbosity: u8,
 
     /// Budget di dimensione massima (in byte) per singolo file (previene attacchi DoS)
     #[arg(

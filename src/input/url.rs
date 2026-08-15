@@ -3,6 +3,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 use reqwest::Client;
 use futures_util::StreamExt;
+use crate::sanitizer::url_rules::UrlValidator;
+use reqwest::redirect::Policy;
 
 /// Gestisce il download asincrono delle risorse web applicando limiti di sicurezza.
 pub struct UrlFetcher {
@@ -19,23 +21,41 @@ pub struct UrlFetcher {
 }
 
 impl UrlFetcher {
-    /// Inizializza il fetcher applicando un timeout globale di sicurezza.
+    /// Inizializza il fetcher applicando un timeout globale di sicurezza e la policy di redirect.
     pub fn new(max_bytes: u64, max_depth: u8, max_request: u32, timeout: Duration) -> Result<Self, reqwest::Error> {
-        // Configuriamo il client con il builder per impostare il timeout prima della creazione
-        let client = Client::builder().timeout(timeout).build()?;
+        // Configuriamo una policy personalizzata per i redirect
+        let custom_redirect_policy = Policy::custom(|attempt| {
+            // Controlliamo il nuovo URL in ogni salto del redirect
+            match UrlValidator::is_safe_redirect_hop(attempt.url().as_str()) {
+                Ok(_) => attempt.follow(), // URL sicuro, segui il redirect
+                Err(e) => {
+                    eprintln!("Bloccato redirect sospetto: {}", e);
+                    attempt.error(e) // Blocca immediatamente la catena
+                }
+            }
+        });
 
-        // Restituisce l'istanza sfruttando la sintassi compatta di Rust
+        // Configuriamo il client con builder aggiungendo la nostra policy
+        let client = Client::builder()
+            .timeout(timeout)
+            .redirect(custom_redirect_policy) 
+            .build()?;
+
         Ok(Self { client, max_bytes, max_depth, max_request, current_requests: AtomicU32::new(0) })
     }
 
-    pub async fn fetch(&self, url: &str, current_depth: u8) -> Result<String, Box<dyn Error>> {
+    pub async fn fetch(&self, url: &str, current_depth: u8) -> Result<Vec<u8>, Box<dyn Error>> {
+        // ==========================================================
+        // Validazione preventiva dell'URL iniziale
+        // ==========================================================
+        UrlValidator::is_safe_redirect_hop(url)?;
+
         // 1. Check Profondità
         if current_depth > self.max_depth {
             return Err("Limite profondità superato".into());
         }
 
-        // 2. Check Richieste e incremento atomico in un solo colpo
-        // fetch_add aggiunge 1 e restituisce il valore PRECEDENTE all'aggiunta
+        // 2. Check Richieste
         let req_count = self.current_requests.fetch_add(1, Ordering::Relaxed);
         if req_count >= self.max_request {
             return Err("Limite richieste superato".into());
@@ -44,56 +64,27 @@ impl UrlFetcher {
         // 3. Facciamo la richiesta
         let response = self.client.get(url).send().await?.error_for_status()?;
 
-        // ==========================================================
-        // NUOVO CONTROLLO: BLOCCO PREVENTIVO DEI CONTENUTI ATTIVI
-        // ==========================================================
+        // 3.5. Controllo Preventivo dell'Header Content-Type
         if let Some(content_type) = response.headers().get(reqwest::header::CONTENT_TYPE) {
             if let Ok(ct_str) = content_type.to_str() {
                 let ct_lower = ct_str.to_lowercase();
-                // Se il server dichiara esplicitamente che è javascript (es. application/javascript, text/javascript)
-                // non ci interessa se il body è innocuo: lo rigettiamo per prevenire XSS.
                 if ct_lower.contains("javascript") {
-                    return Err("MIME_TYPE_REJECTED: Tipo di contenuto attivo dichiarato bloccato preventivamente.".into());
+                    return Err("MIME_TYPE_REJECTED: Il server ha dichiarato un tipo di contenuto attivo (JavaScript)".into());
                 }
             }
         }
 
-        // ==========================================================
-        // NUOVO CONTROLLO: PREVENZIONE DECOMPRESSION BOMB (ZIP BOMB)
-        // ==========================================================
-        if response.headers().contains_key(reqwest::header::CONTENT_ENCODING) {
-            // Se il server dichiara che il contenuto è compresso (es. gzip),
-            // rifiutiamo il download a priori. Questo previene attacchi DoS
-            // in cui file minuscoli si espandono a dimensioni gigantesche.
-            return Err("DECOMPRESSION_BOMB_PREVENTION: Rilevato header Content-Encoding. Download bloccato.".into());
-        }
-
-        // ==========================================================
-        // NUOVO CONTROLLO: PREVENZIONE XML BOMB (Billion Laughs)
-        // ==========================================================
-        if let Some(content_type) = response.headers().get(reqwest::header::CONTENT_TYPE) {
-            if let Ok(ct_str) = content_type.to_str() {
-                let ct_lower = ct_str.to_lowercase();
-                if ct_lower.contains("xml") || ct_lower.contains("svg") {
-                    return Err("XML_BOMB_PREVENTION: Rilevato contenuto XML/SVG potenzialmente vulnerabile a entity expansion. Bloccato preventivamente.".into());
-                }
-            }
-        }
-        // ==========================================================
-
-        // 4. Otteniamo lo stream (che implementa il trait Stream)
+        // 4. Otteniamo lo stream
         let mut stream = response.bytes_stream();
-
         let mut downloaded_bytes = Vec::new();
         let mut total_size: u64 = 0;
 
-        // 5. next() esiste SOLO grazie a use futures::StreamExt;
+        // 5. Check dimensione e download (DoS prevention)
         while let Some(chunk_result) = stream.next().await {
-            let chunk = chunk_result?; // chunk è di tipo bytes::Bytes
+            let chunk = chunk_result?;
             let chunk_size = chunk.len() as u64;
 
             if total_size + chunk_size > self.max_bytes {
-                // Sforato il limite! Interrompiamo tutto.
                 return Err("Attenzione: Il file supera il limite di byte (DoS prevention)!".into());
             }
 
@@ -101,10 +92,7 @@ impl UrlFetcher {
             downloaded_bytes.extend_from_slice(&chunk);
         }
 
-        // 6. Se arriviamo qui senza errori, il file è sicuro ed entro i limiti.
-        let html_string = String::from_utf8_lossy(&downloaded_bytes).to_string();
-
-        Ok(html_string)
+        Ok(downloaded_bytes)
     }
 }
 
@@ -136,7 +124,8 @@ mod tests {
         let result = fetcher.fetch(&url, 0).await;
 
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), "<html>Successo</html>");
+        // Ora confrontiamo con un array di byte crudi (b"...")
+        assert_eq!(result.unwrap(), b"<html>Successo</html>");
         mock.assert_async().await;
     }
 

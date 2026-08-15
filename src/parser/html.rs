@@ -16,6 +16,7 @@ pub struct HtmlParser<'a> {
 }
 
 impl<'a> HtmlParser<'a> {
+    // MODIFICATO: ora accetta &'a str invece di &String
     pub fn new(input: &'a str) -> Self {
         Self { input }
     }
