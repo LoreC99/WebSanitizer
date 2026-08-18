@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Payload XSS e Attributi Malevoli</title>
+    <!-- Tag script diretto da rimuovere -->
+    <script>alert('XSS execution via script tag');</script>
+</head>
+<body>
+    <h1>Infezione XSS Sintetica</h1>
+    
+    <!-- Event Handler inline da pulire -->
+    <button onclick="alert('XSS Click')">Pulsante Malevolo</button>
+    <img src="invalida.png" onerror="alert('XSS OnError')">
+    <body onload="alert('XSS OnLoad')">
+
+    <!-- Pseudo-protocolli pericolosi -->
+    <a href="javascript:alert('XSS via JS Link')">Link Pericoloso JavaScript</a>
+    <iframe src="data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg=="></iframe>
+</body>
+</html>

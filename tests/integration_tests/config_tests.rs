@@ -63,13 +63,12 @@ fn test_custom_policy_applied_to_pipeline() {
 #[test]
 fn test_policy_file_not_found_fallback_to_default() {
     let non_existent_path = "percorso/inventato/inesistente_policy.toml";
-    // Tentiamo il caricamento
     let policy_result = load_policy(non_existent_path);
     // Deve restituire un Result::Err (senza fare panic)
     assert!(policy_result.is_err(), "Il caricamento di un file inesistente deve restituire Err");
     // Gestione del fallback: se il caricamento fallisce, usiamo la policy di default
     let active_policy = policy_result.unwrap_or_else(|err| {
-        println!("⚠️ Errore caricamento config ({}), attivo fallback a default policy", err);
+        println!("Errore caricamento config ({}), attivo fallback a default policy", err);
         default_policy()
     });
     

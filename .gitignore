@@ -1,1 +1,3 @@
 /target
+/sanitized_output/
+/sanitizer_report.json

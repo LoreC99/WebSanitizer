@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Payload SSRF Sintetico</title>
+</head>
+<body>
+    <h1>Tentativi di Accesso SSRF Interno</h1>
+    <!-- Accesso a localhost e IP privati -->
+    <img src="http://127.0.0.1:8080/admin/delete_all" alt="Localhost SSRF">
+    <img src="http://localhost:3000/internal_service" alt="Localhost Domain">
+    <iframe src="http://169.254.169.254/latest/meta-data/iam/security-credentials/"></iframe>
+    <a href="http://10.0.0.1/router_login">Pannello Router Privato</a>
+    <a href="http://192.168.1.1/config">Configurazione Rete Privata</a>
+</body>
+</html>

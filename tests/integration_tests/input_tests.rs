@@ -24,21 +24,19 @@ async fn test_url_download_and_sanitization_success() {
 
     let target_url = format!("{}/page.html", server.url());
 
-    // Creiamo l'UrlFetcher (max 1MB, depth 1, max 5 req, timeout 3s)
+    //Creiamo l'UrlFetcher (max 1MB, depth 1, max 5 req, timeout 3s)
     let fetcher = UrlFetcher::new(1_000_000, 1, 5, Duration::from_secs(3))
         .expect("Inizializzazione UrlFetcher fallita");
 
-    //  Scarichiamo i byte crudi dalla rete simulata
+    //Scarichiamo i byte dalla rete simulata
     let download_result = fetcher.fetch(&target_url, 0).await;
     assert!(download_result.is_ok(), "Il download dell'URL dovrebbe avere successo");
     let downloaded_bytes = download_result.unwrap();
-
-    // =========================================================
-    // NUOVO: Convertiamo i byte crudi in stringa UTF-8
-    // =========================================================
+    
+    //Convertiamo i byte in stringa UTF-8
     let html_content = String::from_utf8_lossy(&downloaded_bytes).to_string();
 
-    //  Passiamo l'HTML scaricato alla pipeline di sanitizzazione
+    //Passiamo l'HTML scaricato alla pipeline di sanitizzazione
     let policy = default_policy();
     let mut engine = SanitizerEngine::new();
     engine.add_rule(Box::new(TagAllowListRule { config: policy.html.clone() }));
@@ -98,4 +96,48 @@ async fn test_url_fetch_network_errors_handling() {
 
     mock_404.assert_async().await;
     mock_500.assert_async().await;
+}
+
+// TEST INTEGRATION: Interruzione download se il file supera il limite max_bytes (DoS Prevention)
+#[tokio::test]
+async fn test_url_fetch_large_resource_limit_integration() {
+    // Avviamo il Mock Server HTTP
+    let mut server = Server::new_async().await;
+
+    // Prepariamo una risposta corposa (es. 500 byte di contenuto)
+    let large_body = "A".repeat(500);
+
+    let mock = server
+        .mock("GET", "/large_file.html")
+        .with_status(200)
+        .with_header("content-type", "text/html")
+        .with_body(large_body)
+        .create_async()
+        .await;
+
+    let target_url = format!("{}/large_file.html", server.url());
+
+    // Creiamo l me UrlFetcher imponendo un limite MAX di soli 100 byte
+    let max_bytes_allowed = 100;
+    let fetcher = UrlFetcher::new(
+        max_bytes_allowed,
+        1,
+        5,
+        Duration::from_secs(3)
+    ).expect("Inizializzazione UrlFetcher fallita");
+
+    // Tentiamo il download
+    let result = fetcher.fetch(&target_url, 0).await;
+
+    // Verifichiamo che il download sia stato BLOCCATO con errore DoS
+    assert!(result.is_err(), "Il download doveva fallire perché supera max_bytes");
+
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("limite di byte") || err_msg.contains("DoS"),
+        "L'errore deve indicare il blocco di sicurezza DoS, ricevuto invece: {}",
+        err_msg
+    );
+
+    mock.assert_async().await;
 }

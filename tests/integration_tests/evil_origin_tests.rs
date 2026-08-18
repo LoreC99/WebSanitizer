@@ -1,0 +1,98 @@
+use std::time::Duration;
+use std::path::PathBuf;
+use std::fs;
+use WebSanitizer::config::loader::default_policy;
+use WebSanitizer::input::directory::DirectoryScanner;
+use WebSanitizer::input::url::UrlFetcher;
+use WebSanitizer::parser::html::HtmlParser;
+use WebSanitizer::sanitizer::engine::SanitizerEngine;
+use WebSanitizer::sanitizer::html_rules::TagAllowListRule;
+
+// TEST: Scansione dei test nella cartella corpus_test (benigni + malevoli)
+#[test]
+fn test_corpus_local_evaluation() {
+    let mut corpus_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    corpus_path.push("corpus_test");
+
+    if !corpus_path.exists() {
+        println!("Cartella corpus_test non trovata");
+        return;
+    }
+
+    let scanner = DirectoryScanner::new(vec!["html".to_string(), "css".to_string()], 5, 100);
+    let files = scanner.scan(&corpus_path).expect("Scansione corpus fallita");
+
+    assert!(!files.is_empty(), "Il corpus_test deve contenere file di test");
+
+    let policy = default_policy();
+
+    for file_path in files {
+        let content = fs::read_to_string(&file_path).unwrap();
+        let path_str = file_path.to_string_lossy().to_string();
+
+        if path_str.contains("benign") {
+            if path_str.ends_with(".html") {
+                let job_res = WebSanitizer::utils::utils::process_html(&content, &path_str, &policy);
+                assert!(job_res.error.is_none(), "Il file benigno non deve generare errori");
+            } else if path_str.ends_with(".css") {
+                let job_res = WebSanitizer::utils::utils::process_css(&content, &path_str);
+                assert!(job_res.error.is_none(), "Il CSS benigno non deve generare errori");
+            }
+        } else if path_str.contains("malicious") {
+            if path_str.ends_with(".html") {
+                let job_res = WebSanitizer::utils::utils::process_html(&content, &path_str, &policy);
+                assert!(job_res.error.is_none(), "Il file malevolo deve essere gestito senza errori");
+                if let Some(report) = job_res.report {
+                    assert!(!report.sanitized_html.contains("<script>"), "Tag script malevoli neutralizzati");
+                    assert!(!report.sanitized_html.contains("onclick="), "Handler onclick neutralizzato");
+                    assert!(!report.sanitized_html.contains("javascript:"), "URI javascript: neutralizzati");
+                }
+            } else if path_str.ends_with(".css") {
+                let job_res = WebSanitizer::utils::utils::process_css(&content, &path_str);
+                if let Some(report) = job_res.report {
+                    assert!(!report.sanitized_html.contains("expression("), "CSS expression neutralizzata");
+                    assert!(!report.sanitized_html.contains("javascript:"), "CSS javascript URL neutralizzato");
+                }
+            }
+        }
+    }
+}
+
+// TEST:  prova la connessione al server Docker evil-origin (se attivo su localhost:3100)
+#[tokio::test]
+async fn test_evil_origin_docker_integration() {
+    let target_url = "http://localhost:3100/health";
+
+    let fetcher = UrlFetcher::new(100_000, 1, 5, Duration::from_secs(2)).unwrap();
+    let res = fetcher.fetch(target_url, 0).await;
+
+    match res {
+        Ok(bytes) => {
+            let body = String::from_utf8_lossy(&bytes).to_string();
+            println!("Connesso a evil-origin Docker server: {}", body);
+            assert!(body.contains("evil-origin") || body.contains("ok"), "Risposta health check valida");
+
+            // Testiamo un endpoint di minaccia reale da evil-origin
+            let threat_url = "http://localhost:3100/html/script-tag";
+            if let Ok(threat_bytes) = fetcher.fetch(threat_url, 0).await {
+                let raw_html = String::from_utf8_lossy(&threat_bytes).to_string();
+                
+                let policy = default_policy();
+                let mut engine = SanitizerEngine::new();
+                engine.add_rule(Box::new(TagAllowListRule { config: policy.html.clone() }));
+
+                let mut parser = HtmlParser::new(&raw_html);
+                if let Ok(dom) = parser.parse() {
+                    let (sanitized_dom, actions) = engine.run(dom);
+                    let clean_html: String = sanitized_dom.iter().map(|n| n.to_html_string()).collect();
+
+                    assert!(!clean_html.contains("<script>"), "Il tag script da evil-origin deve essere eliminato");
+                    assert!(!actions.is_empty(), "La sanitizzazione deve registrare azioni per evil-origin");
+                }
+            }
+        }
+        Err(_) => {
+            println!("Server evil-origin Docker non attivo su http://localhost:3100 (test integrato saltato delicatamente).");
+        }
+    }
+}

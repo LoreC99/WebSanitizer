@@ -20,7 +20,7 @@ pub struct TagAllowListRule {
 impl SanitizationRule for TagAllowListRule {
     fn name(&self) -> String { "TAG_NOT_ALLOW_LISTED".to_string() }
 
-    fn check(&self, content: &str) -> Option<SanitizationAction> {
+    fn check(&self, _content: &str) -> Option<SanitizationAction> {
         todo!()
     }
 
@@ -436,5 +436,89 @@ mod tests {
         assert!(report_clean.is_none());
         
     }
-    
+
+    #[test]
+    fn test_dangerous_attribute_rule_removes_inline_handlers() {
+        let url_config = UrlPolicy {
+            allowed_schemes: vec!["http".to_string(), "https".to_string()],
+            block_data_uris: true,
+            block_javascript_uris: true,
+            blocklist_path: None,
+        };
+        let rule = DangerousAttributeRule { url_config };
+
+        let mut attributes = vec![
+            ("onclick".to_string(), "alert('xss')".to_string()),
+            ("class".to_string(), "btn-primary".to_string()),
+        ];
+        let mut node = Node::element("button");
+        if let Node::Element { attributes: ref mut attrs, .. } = node {
+            *attrs = attributes;
+        }
+
+        let report = rule.apply(&mut node, "html > body[0] > button[0]");
+        assert!(report.is_some());
+        let report_val = report.unwrap();
+        assert_eq!(report_val.rule_fired, "DANGEROUS_ATTRIBUTE_REMOVED");
+
+        if let Node::Element { attributes: ref remaining_attrs, .. } = node {
+            assert_eq!(remaining_attrs.len(), 1);
+            assert_eq!(remaining_attrs[0].0, "class");
+        } else {
+            panic!("Expected Node::Element");
+        }
+    }
+
+    #[test]
+    fn test_dangerous_attribute_rule_removes_javascript_and_data_uris() {
+        let url_config = UrlPolicy {
+            allowed_schemes: vec!["http".to_string(), "https".to_string()],
+            block_data_uris: true,
+            block_javascript_uris: true,
+            blocklist_path: None,
+        };
+        let rule = DangerousAttributeRule { url_config };
+
+        let attributes = vec![
+            ("href".to_string(), "javascript:alert(1)".to_string()),
+            ("src".to_string(), "data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==".to_string()),
+            ("id".to_string(), "safe_link".to_string()),
+        ];
+        let mut node = Node::element("a");
+        if let Node::Element { attributes: ref mut attrs, .. } = node {
+            *attrs = attributes;
+        }
+
+        let report = rule.apply(&mut node, "html > body[0] > a[0]");
+        assert!(report.is_some());
+
+        if let Node::Element { attributes: ref remaining_attrs, .. } = node {
+            assert_eq!(remaining_attrs.len(), 1);
+            assert_eq!(remaining_attrs[0].0, "id");
+        } else {
+            panic!("Expected Node::Element");
+        }
+    }
+
+    #[test]
+    fn test_iframe_removed_when_tag_not_allowed() {
+        let config = HtmlPolicy {
+            allow_scripts: false,
+            remove_iframes: true,
+            block_meta_refresh: true,
+            allowed_tags: vec!["div".to_string(), "p".to_string()], // 'iframe' NON presente
+        };
+        let rule = TagAllowListRule { config };
+
+        let mut node = Node::element("iframe");
+        let report = rule.apply(&mut node, "html > body[0] > iframe[0]");
+        assert!(report.is_some());
+        assert_eq!(report.unwrap().rule_fired, "TAG_NOT_ALLOW_LISTED");
+
+        if let Node::Text(content) = node {
+            assert_eq!(content, "");
+        } else {
+            panic!("Node should be replaced with empty text");
+        }
+    }
 }
