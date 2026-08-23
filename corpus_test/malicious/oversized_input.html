@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Oversized Input & Deep Nesting DoS Test</title>
+</head>
+<body>
+    <h1>Oversized Input Payload Test</h1>
+
+    <!-- 1. Deeply Nested Container Structure (Tree Depth Stress Test) -->
+    <div><div><div><div><div><div><div><div><div><div>
+    <div><div><div><div><div><div><div><div><div><div>
+    <div><div><div><div><div><div><div><div><div><div>
+    <div><div><div><div><div><div><div><div><div><div>
+    <div><div><div><div><div><div><div><div><div><div>
+    <div><div><div><div><div><div><div><div><div><div>
+    <div><div><div><div><div><div><div><div><div><div>
+    <div><div><div><div><div><div><div><div><div><div>
+    <div><div><div><div><div><div><div><div><div><div>
+    <div><div><div><div><div><div><div><div><div><div>
+        <p>Deeply nested node content (100 levels deep)</p>
+        <script>alert('Deep Nesting XSS Payload');</script>
+    </div></div></div></div></div></div></div></div></div></div>
+    </div></div></div></div></div></div></div></div></div></div>
+    </div></div></div></div></div></div></div></div></div></div>
+    </div></div></div></div></div></div></div>0</div></div></div>
+    </div></div></div></div></div></div></div>0</div></div></div>
+    </div></div></div></div></div></div></div>0</div></div></div>
+    </div></div></div></div></div></div></div>0</div></div></div>
+    </div></div></div></div></div></div></div>0</div></div></div>
+    </div></div></div></div></div></div></div>0</div></div></div>
+    </div></div></div></div></div></div></div>0</div></div></div>
+
+    <!-- 2. Oversized Attribute Payload (Attribute Bomb) -->
+    <div data-large-payload="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA">
+        <p>Oversized Attribute Test</p>
+    </div>
+
+    <!-- 3. Repeated Elements Stress Block -->
+    <div>
+        <p>Paragraph element repeated for size stress testing</p>
+        <p>Paragraph element repeated for size stress testing</p>
+        <p>Paragraph element repeated for size stress testing</p>
+        <p>Paragraph element repeated for size stress testing</p>
+        <p>Paragraph element repeated for size stress testing</p>
+        <p>Paragraph element repeated for size stress testing</p>
+        <p>Paragraph element repeated for size stress testing</p>
+        <p>Paragraph element repeated for size stress testing</p>
+        <p>Paragraph element repeated for size stress testing</p>
+
+        <!-- Malicious payload buried inside oversized structure -->
+        <iframe src="javascript:alert('Buried Payload')"></iframe>
+    </div>
+</body>
+</html>

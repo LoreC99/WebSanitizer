@@ -1,3 +1,4 @@
 /target
 /sanitized_output/
 /sanitizer_report.json
+/corpus_test/benchmark_out/

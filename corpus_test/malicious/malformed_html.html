@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Malformed HTML & Parser Edge Cases</title>
+</head>
+<body>
+    <h1>Malformed HTML Edge Cases</h1>
+
+    <!-- 1. Unclosed script tag and missing closing html elements -->
+    <div><script>alert('Unclosed Script Tag')
+
+    <!-- 2. Null byte injection inside tag name -->
+    <scri\x00pt>alert('Null Byte in Tag')</script>
+
+    <!-- 3. Invalid tag nesting (Script inside table element) -->
+    <table>
+        <script>alert('Script inside Table')</script>
+        <tr><td>Data Cell</td></tr>
+    </table>
+
+    <!-- 4. Mismatched and unclosed quotes in attributes -->
+    <a href="javascript:alert(1)' style="color:red">Mismatched Quotes Link</a>
+    <img src="valid.png" alt="Unclosed quote attribute" onerror=alert(1)>
+
+    <!-- 5. Malformed HTML Comments & Tag Injection -->
+    <!-- <script> --> <script>alert('Comment Injection')</script> <!-- -->
+
+    <!-- 6. Broken tag syntax -->
+    <<script>alert('Double Open Bracket')</script>
+    <div /onload="alert('Slash attribute')">Broken Attribute Syntax</div>
+</body>
+</html>

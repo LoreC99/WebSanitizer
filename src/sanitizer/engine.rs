@@ -24,7 +24,7 @@ impl SanitizerEngine {
             }
         }
         // 2. Ricorsione: passa ai figli
-        if let Node::Element { name, children, .. } = node {
+        if let Node::Element { name: _, children, .. } = node {
             for (i, child) in children.iter_mut().enumerate() {
                 // path tipo "html > body[0] > div[2] > iframe[0]"
                 let child_tag = child.name().unwrap_or("#text");
@@ -60,7 +60,7 @@ mod tests {
     impl SanitizationRule for MockRule {
         fn name(&self) -> String { "MOCK_RULE".to_string() }
 
-        fn check(&self, content: &str) -> Option<SanitizationAction> {
+        fn check(&self, _content: &str) -> Option<SanitizationAction> {
             todo!()
         }
 

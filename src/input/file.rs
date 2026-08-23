@@ -2,7 +2,6 @@ use std::error::Error;
 use std::path::Path;
 use tokio::fs;
 use tokio::fs::read;
-use std::string::String;
 
 /// Gestisce la lettura asincrona dei file locali applicando limiti di sicurezza.
 pub struct FileReader {
