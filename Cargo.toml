@@ -25,5 +25,6 @@ plotters = "0.3"
 
 [[bench]]
 name = "evaluation"
+path = "benches/evaluation.rs"
 harness = false
 

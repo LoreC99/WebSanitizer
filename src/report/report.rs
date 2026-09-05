@@ -1,5 +1,3 @@
-/*• Reporting: for every input, emit a structured report listing each sanitisation action (rule fired,
-location in the document, original fragment, replacement) */
 use serde::{Serialize, Deserialize}; //serde (per la serializzazione in JSON)
 
 #[derive(Deserialize)]

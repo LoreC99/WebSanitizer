@@ -40,7 +40,7 @@ impl Node {
             Node::Text(_) => &[],
         }
     }
-    // Il metodo 'add_child' permette di costruire la gerarchia
+    /// Il metodo 'add_child' permette di costruire la gerarchia
     pub fn add_child(&mut self, child: Node) -> Result<(), &'static str> {
         match self {
             Node::Element { children, .. } => {

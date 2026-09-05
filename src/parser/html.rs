@@ -1,14 +1,13 @@
 use scraper::{Html, Node as ScraperNode};
-use super::Node; // Importiamo il TUO nodo definito in mod.rs
+use super::Node;
 
-// Manteniamo il tuo limite per proteggerci dagli attacchi DoS (Resource Bomb)
+// Manteniamo il limite per proteggerci dagli attacchi DoS (Resource Bomb)
 const MAX_DEPTH: usize = 128;
 
 #[derive(Debug, PartialEq)]
 pub enum ParseError {
     MaxDepthExceeded,
-    // Abbiamo rimosso MismatchedTag e UnexpectedClosingTag perché
-    // scraper (essendo un parser standard HTML5) corregge l'HTML malformato da solo.
+    // scraper, essendo un parser standard HTML5 corregge l'HTML malformato da solo
 }
 
 pub struct HtmlParser<'a> {
@@ -16,7 +15,6 @@ pub struct HtmlParser<'a> {
 }
 
 impl<'a> HtmlParser<'a> {
-    // MODIFICATO: ora accetta &'a str invece di &String
     pub fn new(input: &'a str) -> Self {
         Self { input }
     }
@@ -24,14 +22,14 @@ impl<'a> HtmlParser<'a> {
     pub fn parse(&mut self) -> Result<Vec<Node>, ParseError> {
         // 1. IL CUORE DEL REFACTORING:
         // Usiamo un parser SICURO, ESISTENTE e standard (Mozilla html5ever via scraper)
-        // per leggere la stringa. Questo soddisfa in pieno il requisito del PDF.
+        // per leggere la stringa
         let document = Html::parse_fragment(self.input);
 
         let mut root_nodes = Vec::new();
 
         // 2. IL WRAPPER:
         // Attraversiamo l'albero sicuro di scraper e lo traduciamo
-        // nella tua struttura `Node`, così il tuo SanitizerEngine continua a funzionare intatto.
+        // nella struttura `Node`
         for child in document.tree.root().children() {
             if let Some(node) = Self::traverse(child, 1)? {
                 root_nodes.push(node);
@@ -81,7 +79,7 @@ impl<'a> HtmlParser<'a> {
             }
 
             // Ignoriamo Commenti, Doctype e ProcessingInstructions.
-            // Eliminarli direttamente dal parser ci protegge preventivamente.
+            // Eliminarli direttamente dal parser ci protegge preventivamente
             _ => Ok(None),
         }
     }
@@ -176,7 +174,7 @@ mod tests {
     #[test]
     fn test_depth_exceeding_limit_returns_error() {
         // MAX_DEPTH è 128. Siccome scraper aggiunge implicitamente i livelli <html> e <body>,
-        // annidare 128 tag supera il limite di profondità consentito.
+        // annidare 128 tag supera il limite di profondità consentito
         let input = "<div>".repeat(128) + &"</div>".repeat(128);
         let mut parser = HtmlParser::new(&input);
         let result = parser.parse();
@@ -186,8 +184,7 @@ mod tests {
 
     #[test]
     fn test_malformed_html_is_auto_corrected() {
-        // In precedenza questo andava in ParseError::MismatchedTag.
-        // Ora il parser HTML5 corregge automaticamente i tag sbilanciati chiudendo il <span>.
+        // Il parser HTML5 corregge automaticamente i tag sbilanciati chiudendo il <span>
         let mut parser = HtmlParser::new("<div><span></div>");
         let result = parser.parse().unwrap();
 

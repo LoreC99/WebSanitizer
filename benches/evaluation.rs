@@ -95,6 +95,9 @@ block_javascript_uris = true
 fetch_resources = true
 max_depth = 2
 max_resource_size = 5242880
+
+[directories]
+allowed_extensions = ["html", "htm", "css", "txt"]
 "#;
     fs::write(&fetch_policy_path, toml_content)?;
     let fetch_policy = load_policy(&fetch_policy_path)?;

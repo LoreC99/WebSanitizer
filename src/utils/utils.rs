@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use crate::cli::cli::Cli;
 use crate::config::Policy;
 use crate::parser::html::HtmlParser;
 use crate::report::{BatchReport, SanitizationAction, SanitizationReport};
@@ -7,6 +8,47 @@ use crate::sanitizer::engine::SanitizerEngine;
 use crate::sanitizer::html_rules::{DangerousAttributeRule, IdnHomographRule, MetaRefreshRule, SsrfAttributeRule, TagAllowListRule};
 use crate::sanitizer::resource_rules::{CssSanitizer, DetectedType, ImageCheckResult, ImageSanitizer, PdfCheckResult, PdfSanitizer};
 use crate::scheduler::workers::JobResult;
+
+/// Stampa a video la configurazione CLI attiva, omettendo i parametri di default non modificati.
+pub fn print_active_config(cli: &Cli) {
+    println!("⚙️  Configurazione Parametri Attiva:");
+    println!("   - Target in input  : {:?}", cli.inputs);
+
+    // --- Parametri Opzionali ---
+    if let Some(ref policy) = cli.policy_path {
+        println!("   - Policy custom    : {:?}", policy);
+    }
+    if let Some(t) = cli.threads {
+        println!("   - Threads Worker   : {}", t);
+    }
+
+    // --- Parametri con Default ---
+    if cli.output_dir.to_str() != Some("./sanitized_output") {
+        println!("   - Output Dir       : {:?}", cli.output_dir);
+    }
+    if cli.max_bytes != 10485760 {
+        println!("   - Max Bytes (DoS)  : {} bytes", cli.max_bytes);
+    }
+    if cli.timeout_seconds != 30 {
+        println!("   - Timeout Rete     : {} secondi", cli.timeout_seconds);
+    }
+    if cli.max_depth != 0 {
+        println!("   - Max Depth (Net)  : {}", cli.max_depth);
+    }
+    if cli.max_requests != 50 {
+        println!("   - Max Reqs (Net)   : {}", cli.max_requests);
+    }
+    if cli.dir_max_depth != 10 {
+        println!("   - Max Depth (Dir)  : {}", cli.dir_max_depth);
+    }
+    if cli.dir_max_files != 10000 {
+        println!("   - Max Files (Dir)  : {}", cli.dir_max_files);
+    }
+    if cli.report_file.to_str() != Some("./sanitizer_report.json") {
+        println!("   - File di Report   : {:?}", cli.report_file);
+    }
+    println!("==================================================\n");
+}
 
 /// Salva il contenuto HTML pulito generando un nome file sicuro.
 pub fn save_sanitized_html(output_dir: &Path, target: &str, html_content: &str) {

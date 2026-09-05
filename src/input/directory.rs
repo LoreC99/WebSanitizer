@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
 pub struct DirectoryScanner {
-    /// Lista delle estensioni consentite (es. "html", "htm").
+    /// Lista delle estensioni consentite
     /// Filtra i file irrilevanti alla fonte.
     allowed_extensions: Vec<String>,
 
@@ -75,7 +75,7 @@ mod tests {
     }
 
     #[test]
-    fn test_scan_filtra_estensioni_correttamente() {
+    fn test_scan_filters_extensions_correctly() {
         let dir = setup_test_dir("estensioni");
 
         // Creiamo file misti
@@ -97,7 +97,7 @@ mod tests {
     }
 
     #[test]
-    fn test_scan_rispetta_limite_profondità() {
+    fn test_scan_max_depth() {
         let root_dir = setup_test_dir("profondità");
 
         // Livello 1 (Radice)
@@ -127,7 +127,8 @@ mod tests {
     }
 
     #[test]
-    fn test_scan_rispetta_limite_massimo_file_dos() {
+    
+    fn test_scan_max_files_limit() {
         let dir = setup_test_dir("max_files");
 
         // Creiamo 5 file validi

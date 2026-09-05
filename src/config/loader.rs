@@ -7,11 +7,13 @@ use std::error::Error;
 // 1. Definizione delle Strutture Dati
 // ==========================================
 
+/// Policy generale contenente le varie "sotto-policies"
 #[derive(Debug, Deserialize, Clone)]
 pub struct Policy {
     pub html: HtmlPolicy,
     pub url: UrlPolicy,
     pub resources: ResourcePolicy,
+    pub directories: DirectoryPolicy,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -35,6 +37,11 @@ pub struct ResourcePolicy {
     pub fetch_resources: bool,
     pub max_depth: u8,
     pub max_resource_size: u64,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct DirectoryPolicy {
+    pub allowed_extensions: Vec<String>,
 }
 
 // ==========================================
@@ -101,6 +108,9 @@ mod tests {
             fetch_resources = true
             max_depth = 3
             max_resource_size = 5000
+
+            [directories]
+            allowed_extensions = ["html", "htm"]
         "#;
         fs::write(&path, toml_content).expect("Impossibile creare il file TOML di test");
 
@@ -115,6 +125,7 @@ mod tests {
         assert_eq!(policy.url.allowed_schemes, vec!["https", "mailto"]);
         assert_eq!(policy.resources.max_depth, 3);
         assert_eq!(policy.resources.max_resource_size, 5000);
+        assert_eq!(policy.directories.allowed_extensions, vec!["html", "htm"]);
 
         // 4. Pulizia
         let _ = fs::remove_file(&path);
@@ -153,14 +164,8 @@ mod tests {
 
     #[test]
     fn test_default_policy_loads_without_panic() {
-        // Questo test è semplicissimo ma fondamentale.
-        // Se il file strict.toml specificato in `include_str!` è malformato,
-        // toml::from_str(...).expect(...) farà crashare (panic) questo test.
-        // Se il test passa, significa che la policy di default è sintatticamente perfetta.
-
         let policy = default_policy();
 
-        // Facciamo un sanity check su un paio di valori che ci aspettiamo in una policy strict
         assert_eq!(policy.html.allow_scripts, false, "La policy di default dovrebbe vietare gli script");
         assert_eq!(policy.html.remove_iframes, true, "La policy di default dovrebbe rimuovere gli iframe");
     }

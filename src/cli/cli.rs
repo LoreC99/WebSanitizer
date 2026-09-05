@@ -8,7 +8,7 @@ use clap::{Parser};
     version,
     about = "Un web sanitizer concorrente e sicuro in Rust",
     long_about = "Applicazione CLI che analizza, pulisce e neutralizza contenuti web (HTML, URL, asset) \
-                  in base a policy dichiarative, producendo report strutturati in JSON."
+                  in base a policy dichiarative, producendo report strutturati in JSON"
 )]
 pub struct Cli {
     /// Lista di input da elaborare in batch (file locali, directory o URL)
@@ -77,6 +77,22 @@ pub struct Cli {
         default_value = "50"
     )]
     pub max_requests: u32,
+
+    /// Profondità massima per l'esplorazione delle directory locali
+    #[arg(
+        long = "dir-max-depth",
+        value_name = "DIR_DEPTH",
+        default_value = "10"
+    )]
+    pub dir_max_depth: usize,
+
+    /// Numero massimo di file da scansionare per directory (previene DoS da I/O)
+    #[arg(
+        long = "dir-max-files",
+        value_name = "MAX_FILES",
+        default_value = "10000"
+    )]
+    pub dir_max_files: usize,
 
     /// Percorso in cui salvare il report JSON globale dell'elaborazione batch
     #[arg(

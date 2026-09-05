@@ -195,6 +195,8 @@ fn test_integration_multithread_batch_processing() {
         threads: Some(2), // 2 worker thread
         max_depth: 1,
         max_requests: 50,
+        dir_max_depth: 10,
+        dir_max_files: 10000,
         report_file: temp_dir.join("multithread_report.json"),
     };
     let cli_config = Arc::new(cli);

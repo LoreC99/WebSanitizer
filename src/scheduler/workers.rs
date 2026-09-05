@@ -122,7 +122,6 @@ impl Worker {
                             // 1. ASTRAZIONE DELL'INPUT: Rete o File Locale?
                             let fetch_result = match job {
                                 Job::Url(url) => {
-                                    // IL FETCH DI RETE USA GIÀ CORRETTAMENTE UrlFetcher
                                     let fetcher = match UrlFetcher::new(
                                         config.max_bytes,
                                         config.max_depth,
@@ -142,12 +141,26 @@ impl Worker {
                                     fetcher.fetch(&url, 0).await.map_err(|e| format!("Errore Rete: {}", e))
                                 },
                                 Job::File(filepath) => {
-                                    // ========================================================
-                                    // Utilizzo di FileReader al posto di std::fs
-                                    // ========================================================
+                                    let path_obj = std::path::Path::new(&filepath);
+
+                                    // Controllo dell'estensione contro la policy [directories]
+                                    if let Some(ext_str) = path_obj.extension().and_then(|os_str| os_str.to_str()) {
+                                        let is_allowed = policy.directories.allowed_extensions
+                                            .iter()
+                                            .any(|e| e.eq_ignore_ascii_case(ext_str));
+
+                                        if !is_allowed {
+                                            return JobResult {
+                                                target: target_name.clone(),
+                                                report: None,
+                                                error: Some(format!("POLICY_REJECTED: Estensione '.{}' non autorizzata", ext_str)),
+                                            };
+                                        }
+                                    }
+
                                     let reader = FileReader::new(config.max_bytes);
 
-                                    reader.read(std::path::Path::new(&filepath))
+                                    reader.read(path_obj)
                                         .await
                                         .map_err(|e| format!("Errore Lettura File (DoS Prevention): {}", e))
                                 }
@@ -156,7 +169,7 @@ impl Worker {
                                 Ok(raw_bytes_vec) => {
                                     let raw_bytes = raw_bytes_vec.as_slice();
 
-                                    // Sniffiamo i byte PURI, così il GZIP verrà finalmente riconosciuto!
+                                    // Sniffiamo i byte PURI
                                     let detected_type = MimeSniffer::sniff(raw_bytes);
 
                                     // 1. Valutazione tipi binari o pericolosi
