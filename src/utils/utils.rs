@@ -84,7 +84,7 @@ pub fn save_batch_report(report_file: &PathBuf, report: &BatchReport) {
 /// Restituisce `Some(JobResult)` se ha gestito il file, oppure `None` se deve proseguire con HTML/CSS.
 pub fn evaluate_mime_type(detected_type: &DetectedType, raw_bytes: &[u8], target_name: &str) -> Option<JobResult> {
     match detected_type {
-        DetectedType::Html | DetectedType::Unknown => None, // Passa il controllo all'elaborazione testuale
+        DetectedType::Html | DetectedType::Unknown => None, 
         DetectedType::Png => {
             Some(match ImageSanitizer::check_dimensions(raw_bytes) {
                 ImageCheckResult::DimensionBomb { width, height } => JobResult {

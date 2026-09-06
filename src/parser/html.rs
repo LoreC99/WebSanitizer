@@ -1,8 +1,8 @@
 use scraper::{Html, Node as ScraperNode};
 use super::Node;
-
+use crate::cli::cli::Cli;
 // Manteniamo il limite per proteggerci dagli attacchi DoS (Resource Bomb)
-const MAX_DEPTH: usize = 128;
+
 
 #[derive(Debug, PartialEq)]
 pub enum ParseError {
@@ -40,9 +40,9 @@ impl<'a> HtmlParser<'a> {
     }
 
     // Funzione ricorsiva per la traduzione dell'albero
-    fn traverse(node: ego_tree::NodeRef<ScraperNode>, depth: usize) -> Result<Option<Node>, ParseError> {
+    fn traverse(node: ego_tree::NodeRef<ScraperNode>, depth: u8) -> Result<Option<Node>, ParseError> {
         // Applichiamo la tua regola di sicurezza sulla profondità massima
-        if depth > MAX_DEPTH {
+        if depth > Cli::parse_args().max_depth {
             return Err(ParseError::MaxDepthExceeded);
         }
 

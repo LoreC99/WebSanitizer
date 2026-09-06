@@ -64,14 +64,6 @@ block_javascript_uris = true
 # Disabilitarlo di default previene attacchi SSRF (Server-Side Request Forgery).
 fetch_resources = false
 
-# Profondità massima per le risorse annidate (es. CSS che importa CSS).
-# Impostato a 0 perché il fetch è disabilitato di default.
-max_depth = 0
-
-# Budget di dimensione per singola risorsa (se fetch_resources fosse true).
-# Impostato a 5 MB (5242880 bytes) per prevenire attacchi DoS (es. compression bombs).
-max_resource_size = 5242880
-
 [directories]
 #Estensioni da controllare all'interno di una directory
 allowed_extensions = ["html", "htm", "css", "txt"]

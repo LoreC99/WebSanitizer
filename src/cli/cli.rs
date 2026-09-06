@@ -66,7 +66,7 @@ pub struct Cli {
     #[arg(
         long = "max-depth",
         value_name = "DEPTH",
-        default_value = "0"
+        default_value = "128"
     )]
     pub max_depth: u8,
 

@@ -8,7 +8,7 @@ use crate::cli::cli::Cli;
 // ==========================================
 use crate::config::loader;
 use crate::input::url::UrlFetcher;
-use crate::sanitizer::resource_rules::{MimeSniffer};
+use crate::sanitizer::resource_rules::{MimeSniffer, ResourceGuard};
 use crate::input::file::FileReader;
 pub use crate::scheduler::{Job, JobResult, SharedState};
 use crate::utils::utils::{evaluate_mime_type, process_css, process_html};
@@ -95,7 +95,7 @@ impl Worker {
                             custom_policy
                         },
                         Err(e) => {
-                            eprintln!("⚠️ Worker {}: Errore nel caricare la policy {:?} ({}). Fallback a default.", id, path, e);
+                            eprintln!("Worker {}: Errore nel caricare la policy {:?} ({}). Fallback a default.", id, path, e);
                             loader::default_policy()
                         }
                     }
@@ -122,10 +122,18 @@ impl Worker {
                             // 1. ASTRAZIONE DELL'INPUT: Rete o File Locale?
                             let fetch_result = match job {
                                 Job::Url(url) => {
-                                    let fetcher = match UrlFetcher::new(
-                                        config.max_bytes,
+                                    // Creiamo il guard passandogli l'intera ResourcePolicy (dal TOML)
+                                    // e iniettando i limiti operativi presi dalla CLI
+                                    let resource_guard = ResourceGuard::new(
+                                        policy.resources.clone(),
                                         config.max_depth,
                                         config.max_requests,
+                                        config.max_bytes
+                                    );
+
+                                    // 2. Passiamo il guardiano al fetcher
+                                    let fetcher = match UrlFetcher::new(
+                                        resource_guard,
                                         std::time::Duration::from_secs(config.timeout_seconds),
                                     ) {
                                         Ok(f) => f,

@@ -2,7 +2,6 @@ use regex::Regex;
 use crate::config::loader::{ResourcePolicy};
 use crate::report::report::SanitizationAction;
 
-
 /// Sanitizzatore dedicato ai fogli di stile CSS (sia inline nei tag <style> che file esterni .css)
 pub struct CssSanitizer;
 
@@ -115,9 +114,13 @@ impl MimeSniffer {
 
 pub struct ResourceGuard {
     config: ResourcePolicy,       // max_depth, max_resource_size (e un futuro max_requests)
+    max_depth: u8,
+    max_requests: u32,
+    max_bytes: u64,
     requests_made: usize,          // contatore richieste già effettuate
 }
 
+#[derive(Debug)]
 pub enum RefusalReason {
     // --- controlli generali di rete/risorse ---
     MaxDepthExceeded { current: usize, limit: usize },
@@ -137,33 +140,35 @@ pub enum RefusalReason {
     XmlEntityExpansionBomb { details: String },
 }
 
-//FORSE GIA IMPLEMETATO IN URL FETCHER? INPUT/URL.RS
 impl ResourceGuard {
-    pub fn new(config: ResourcePolicy) -> Self {
-        Self { config, requests_made: 0 }
+    pub fn new(config: ResourcePolicy, max_depth: u8, max_requests: u32, max_bytes: u64) -> Self {
+        Self { config,
+            max_depth,
+            max_requests,
+            max_bytes,
+            requests_made: 0 }
     }
 
     /// Chiamata PRIMA di fare la fetch di una sub-risorsa.
     /// current_depth: quanto siamo annidati (0 = risorsa diretta del documento principale)
     pub fn check_before_fetch(&self, current_depth: usize) -> Result<(), RefusalReason> {
-        
-        const MAX_REQUESTS: usize = 20;
+
         // 1. fetch_resources è disabilitato?
         if self.config.fetch_resources == false {
             return Err(RefusalReason::FetchingDisabled);
         }
         // 2. current_depth supera self.config.max_depth?
-        if current_depth as u8 >= self.config.max_depth {
+        if current_depth as u8 >= self.max_depth {
             return Err(RefusalReason::MaxDepthExceeded {
                 current: current_depth,
-                limit: self.config.max_depth as usize,
+                limit: self.max_depth as usize,
             });
         }
         // 3. self.requests_made ha già raggiunto un massimo?
-        if self.requests_made >= MAX_REQUESTS {
+        if self.requests_made >= self.max_requests as usize {
             return Err(RefusalReason::MaxRequestsExceeded {
                 current: self.requests_made,
-                limit: MAX_REQUESTS,
+                limit: self.max_requests as usize,
             });
         }
         Ok(())
@@ -173,10 +178,10 @@ impl ResourceGuard {
     /// Chiamata DOPO aver scaricato i byte, prima di processarli.
     pub fn check_response_size(&self, byte_len: usize) -> Result<(), RefusalReason> {
         // confronta byte_len con self.config.max_resource_size
-        if byte_len as u64 > self.config.max_resource_size {
+        if byte_len as u64 > self.max_bytes {
             return Err(RefusalReason::ResourceTooLarge {
                 size: byte_len,
-                limit: self.config.max_resource_size,
+                limit: self.max_bytes,
             });
         }
         Ok(())
@@ -255,28 +260,6 @@ impl ImageSanitizer {
     }
 }
 
-pub struct XmlSanitizer;
-
-//Servono regole per analizzare file application/xml o .svg e rifiutare file che usano l'espansione delle entità <!ENTITY> (Billion Laughs Bomb).
-impl XmlSanitizer {
-    pub fn check_xml_bomb(raw_bytes: &[u8]) -> Result<(), String> {
-        let content = String::from_utf8_lossy(raw_bytes);
-        // Se contiene molte dichiarazioni ENTITY nidificate, rifiuta per DoS
-        if content.contains("<!ENTITY") && content.matches("ENTITY").count() > 5 {
-            return Err("REJECTED: XML Entity Expansion Bomb (Billion Laughs)".to_string());
-        }
-        Ok(())
-    }
-}
-
-pub struct GzipGuard;
-
-impl GzipGuard {
-    /// Riconosce i Magic Bytes di un file GZIP (0x1F 0x8B)
-    pub fn is_gzip(bytes: &[u8]) -> bool {
-        bytes.starts_with(&[0x1F, 0x8B])
-    }
-}
 
 // in resource_rules.rs, o in report.rs se preferisci tenerlo centralizzato
 impl From<RefusalReason> for SanitizationAction {
@@ -322,55 +305,54 @@ mod tests {
     fn test_resource_guard_fetch_disabled() {
         let config = ResourcePolicy {
             fetch_resources: false,
-            max_depth: 3,
-            max_resource_size: 1024,
         };
-        let guard = ResourceGuard::new(config);
+        // Aggiungiamo i limiti fittizi: depth=3, requests=20, bytes=1024
+        let guard = ResourceGuard::new(config, 3, 20, 1024);
 
         assert!(guard.check_before_fetch(0).is_err()); // fetch disabilitato
     }
+
     #[test]
     fn test_resource_guard_depth_limit() {
         let config = ResourcePolicy {
             fetch_resources: true,
-            max_depth: 3,
-            max_resource_size: 1024,
         };
-        let guard = ResourceGuard::new(config);
+        // Impostiamo max_depth a 3
+        let guard = ResourceGuard::new(config, 3, 20, 1024);
 
         assert!(guard.check_before_fetch(0).is_ok());
         assert!(guard.check_before_fetch(2).is_ok());
         assert!(guard.check_before_fetch(3).is_err()); // superato il limite
     }
+
     #[test]
     fn test_resource_guard_size_limit() {
         let config = ResourcePolicy {
             fetch_resources: true,
-            max_depth: 3,
-            max_resource_size: 1024,
         };
-        let guard = ResourceGuard::new(config);
+        // Impostiamo max_bytes a 1024
+        let guard = ResourceGuard::new(config, 3, 20, 1024);
 
         assert!(guard.check_response_size(512).is_ok());
         assert!(guard.check_response_size(1024).is_ok());
         assert!(guard.check_response_size(2048).is_err()); // superato il limite
     }
+
     #[test]
     fn test_resource_guard_request_limit() {
         let config = ResourcePolicy {
             fetch_resources: true,
-            max_depth: 3,
-            max_resource_size: 1024,
         };
-        let mut guard = ResourceGuard::new(config);
+        // Impostiamo max_requests a 20
+        let mut guard = ResourceGuard::new(config, 3, 20, 1024);
 
         for _ in 0..20 {
             guard.record_request();
         }
         assert!(guard.check_before_fetch(0).is_err()); // superato il limite di richieste
-
     }
-        #[test]
+
+    #[test]
     fn test_png_dimension_check() {
         let valid_png: [u8; 24] = [
             0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // Magic bytes
@@ -380,7 +362,7 @@ mod tests {
             0x00, 0x00, 0x01, 0x00, // Height: 256
         ];
         assert_eq!(
-            ImageSanitizer::check_dimensions(&valid_png), 
+            ImageSanitizer::check_dimensions(&valid_png),
             ImageCheckResult::Valid { width: 256, height: 256 }
         );
 
@@ -392,10 +374,11 @@ mod tests {
             0x00, 0x00, 0x10, 0x00, // Height: 4096
         ];
         assert_eq!(
-            ImageSanitizer::check_dimensions(&bomb_png), 
+            ImageSanitizer::check_dimensions(&bomb_png),
             ImageCheckResult::DimensionBomb { width: 4097, height: 4096 }
         );
     }
+
     #[test]
     fn test_pdf_active_content_check() {
         let pdf_with_js = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog /OpenAction 5 0 R >>\nendobj\n5 0 obj\n<< /S /JavaScript /JS (app.alert('ciao');) >>\nendobj\n";
@@ -404,6 +387,4 @@ mod tests {
         let pdf_without_js = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n";
         assert_eq!(PdfSanitizer::check_active_content(pdf_without_js), PdfCheckResult::Clean);
     }
-    
 }
-

@@ -25,7 +25,7 @@ fn main() {
 
     // Prepariamo la directory di output se non esiste
     if let Err(e) = fs::create_dir_all(&cli.output_dir) {
-        eprintln!("❌ Errore nella creazione della cartella di output: {}", e);
+        eprintln!("Errore nella creazione della cartella di output: {}", e);
         std::process::exit(1);
     }
 
@@ -74,7 +74,7 @@ fn main() {
                 total_jobs += 1;
             } else if path.is_dir() {
                 // Gestisco qui il caso directory per passare immediatamente i file ai workers
-                println!("📁 Rilevata directory locale: {}. Scansione in corso...", target);
+                println!("Rilevata directory locale: {}. Scansione in corso...", target);
 
                 let scanner = DirectoryScanner::new(
                     allowed_extensions.clone(),
@@ -91,11 +91,11 @@ fn main() {
                             }
                         }
                     }
-                    Err(e) => eprintln!("⚠️ Errore nella scansione della directory: {}", e),
+                    Err(e) => eprintln!("Errore nella scansione della directory: {}", e),
                 }
             } else {
                 // In caso l'input non sia valido ritorno un errore
-                eprintln!("⚠️ Attenzione: L'input '{}' non è né un URL valido né un percorso locale esistente.", target);
+                eprintln!("Attenzione: L'input '{}' non è né un URL valido né un percorso locale esistente.", target);
             }
         }
     }
@@ -110,10 +110,10 @@ fn main() {
     for _ in 0..total_jobs {
         if let Ok(result) = result_receiver.recv() {
             if let Some(error) = result.error {
-                println!("❌ FALLITO: {} -> {}", result.target, error);
+                println!("FALLITO: {} -> {}", result.target, error);
                 error_count += 1;
             } else if let Some(report) = result.report {
-                println!("✅ COMPLETATO: {} -> (Minacce rimosse: {})", result.target, report.actions.len());
+                println!("COMPLETATO: {} -> (Minacce rimosse: {})", result.target, report.actions.len());
                 success_count += 1;
 
                 save_sanitized_html(&cli_config.output_dir, &result.target, &report.sanitized_html);

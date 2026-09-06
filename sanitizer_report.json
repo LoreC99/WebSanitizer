@@ -1,21 +1,7 @@
 {
   "total_processed": 1,
-  "total_threats_removed": 1,
-  "success_count": 1,
-  "error_count": 0,
-  "detailed_results": [
-    {
-      "input_source": "http://127.0.0.1:3100/redirect/triple-hop-to-script-html",
-      "status": "Cleaned",
-      "actions": [
-        {
-          "rule_fired": "TAG_NOT_ALLOW_LISTED",
-          "location": "html[0] > script[1]",
-          "original_fragment": "<script>...1 children...</script>",
-          "replacement": ""
-        }
-      ],
-      "sanitized_html": "<html><h1>Hello</h1></html>"
-    }
-  ]
+  "total_threats_removed": 0,
+  "success_count": 0,
+  "error_count": 1,
+  "detailed_results": []
 }

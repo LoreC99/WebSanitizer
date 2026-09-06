@@ -33,7 +33,7 @@ impl SanitizerEngine {
             }
         }
     }
-    //lavora sy node, poi scende ricorsivamente sui figli, e accumula le azioni di sanitizzazione in report
+    //lavora su node, poi scende ricorsivamente sui figli, e accumula le azioni di sanitizzazione in report
     pub fn run(&self, mut root_nodes: Vec<Node>) -> (Vec<Node>, Vec<SanitizationAction>) {
         let mut report = Vec::new();
 

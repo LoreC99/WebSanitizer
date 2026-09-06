@@ -35,8 +35,6 @@ pub struct UrlPolicy {
 #[derive(Debug, Deserialize, Clone)]
 pub struct ResourcePolicy {
     pub fetch_resources: bool,
-    pub max_depth: u8,
-    pub max_resource_size: u64,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -123,8 +121,6 @@ mod tests {
 
         assert_eq!(policy.html.allow_scripts, true);
         assert_eq!(policy.url.allowed_schemes, vec!["https", "mailto"]);
-        assert_eq!(policy.resources.max_depth, 3);
-        assert_eq!(policy.resources.max_resource_size, 5000);
         assert_eq!(policy.directories.allowed_extensions, vec!["html", "htm"]);
 
         // 4. Pulizia
