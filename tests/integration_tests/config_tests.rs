@@ -32,6 +32,9 @@ fn test_custom_policy_applied_to_pipeline() {
         fetch_resources = false
         max_depth = 1
         max_resource_size = 1000
+
+        [directories]
+        allowed_extensions = ["html", "css"]
     "#;
 
     fs::write(&custom_config_path, custom_toml).expect("Impossibile scrivere il TOML custom");

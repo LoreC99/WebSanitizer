@@ -4,6 +4,7 @@ use WebSanitizer::input::url::UrlFetcher;
 use WebSanitizer::parser::html::HtmlParser;
 use WebSanitizer::sanitizer::engine::SanitizerEngine;
 use WebSanitizer::sanitizer::html_rules::TagAllowListRule;
+use WebSanitizer::sanitizer::resource_rules::ResourceGuard;
 use mockito::Server;
 
 // TEST DOWNLOAD URL & PIPELINE: HTML Malevolo scaricato da Server Mock
@@ -24,8 +25,12 @@ async fn test_url_download_and_sanitization_success() {
 
     let target_url = format!("{}/page.html", server.url());
 
-    //Creiamo l'UrlFetcher (max 1MB, depth 1, max 5 req, timeout 3s)
-    let fetcher = UrlFetcher::new(1_000_000, 1, 5, Duration::from_secs(3))
+    let mut res_policy = default_policy().resources;
+    res_policy.fetch_resources = true;
+
+    // Creiamo il ResourceGuard con i limiti desiderati (max_depth: 1, max_requests: 5, max_bytes: 1MB)
+    let guard = ResourceGuard::new(res_policy, 1, 5, 1_000_000);
+    let fetcher = UrlFetcher::new(guard, Duration::from_secs(3))
         .expect("Inizializzazione UrlFetcher fallita");
 
     //Scarichiamo i byte dalla rete simulata
@@ -74,7 +79,11 @@ async fn test_url_fetch_network_errors_handling() {
         .create_async()
         .await;
 
-    let fetcher = UrlFetcher::new(1_000_000, 1, 5, Duration::from_secs(3)).unwrap();
+    let mut res_policy = default_policy().resources;
+    res_policy.fetch_resources = true;
+
+    let guard = ResourceGuard::new(res_policy, 1, 5, 1_000_000);
+    let fetcher = UrlFetcher::new(guard, Duration::from_secs(3)).unwrap();
 
     // TEST per 404 
     let url_404 = format!("{}/not_found.html", server.url());
@@ -117,14 +126,14 @@ async fn test_url_fetch_large_resource_limit_integration() {
 
     let target_url = format!("{}/large_file.html", server.url());
 
-    // Creiamo l me UrlFetcher imponendo un limite MAX di soli 100 byte
+    let mut res_policy = default_policy().resources;
+    res_policy.fetch_resources = true;
+
+    // Creiamo UrlFetcher imponendo un limite MAX di soli 100 byte
     let max_bytes_allowed = 100;
-    let fetcher = UrlFetcher::new(
-        max_bytes_allowed,
-        1,
-        5,
-        Duration::from_secs(3)
-    ).expect("Inizializzazione UrlFetcher fallita");
+    let guard = ResourceGuard::new(res_policy, 1, 5, max_bytes_allowed);
+    let fetcher = UrlFetcher::new(guard, Duration::from_secs(3))
+        .expect("Inizializzazione UrlFetcher fallita");
 
     // Tentiamo il download
     let result = fetcher.fetch(&target_url, 0).await;

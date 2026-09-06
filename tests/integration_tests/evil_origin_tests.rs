@@ -7,6 +7,7 @@ use WebSanitizer::input::url::UrlFetcher;
 use WebSanitizer::parser::html::HtmlParser;
 use WebSanitizer::sanitizer::engine::SanitizerEngine;
 use WebSanitizer::sanitizer::html_rules::TagAllowListRule;
+use WebSanitizer::sanitizer::resource_rules::ResourceGuard;
 
 // TEST: Scansione dei test nella cartella corpus_test (benigni + malevoli) e stampa valutazioni esplicite
 #[test]
@@ -100,7 +101,11 @@ fn test_corpus_local_evaluation() {
 async fn test_evil_origin_docker_integration() {
     let target_url = "http://localhost:3100/health";
 
-    let fetcher = UrlFetcher::new(100_000, 1, 5, Duration::from_secs(2)).unwrap();
+    let mut res_policy = default_policy().resources;
+    res_policy.fetch_resources = true;
+
+    let guard = ResourceGuard::new(res_policy, 1, 5, 1_000_000);
+    let fetcher = UrlFetcher::new(guard, Duration::from_secs(2)).expect("Inizializzazione UrlFetcher fallita");
     let res = fetcher.fetch(target_url, 0).await;
 
     match res {
